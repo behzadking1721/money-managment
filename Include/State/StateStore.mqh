@@ -5,8 +5,8 @@
 #ifndef MM_STATE_STORE_MQH
 #define MM_STATE_STORE_MQH
 
-#include "Contracts.mqh"
-#include "SimpleJson.mqh"
+#include "../Core/Contracts.mqh"
+#include "../Core/SimpleJson.mqh"
 
 struct MM_SymbolState
 {
@@ -117,7 +117,7 @@ public:
             if(h!=INVALID_HANDLE)
             {
                datetime srv=EffectiveServerTime();
-               long pid=(long)TerminalInfoInteger(TERMINAL_PROCESS_ID);
+               long pid=0; // PID not portable in MQL5; owner/chart/ts used for diagnostics
                FileWriteString(h,"owner="+(string)ChartID()+";ts="+(string)TimeLocal()+";srv="+(string)srv+";pid="+(string)pid);
                FileClose(h);
                m_locked=true; return true;

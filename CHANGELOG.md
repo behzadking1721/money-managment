@@ -2,6 +2,45 @@
 
 All notable changes to this project are documented here (phase-based).
 
+## [v0.4.0-phase4] - In progress (Phase 4: Drag & Drop UI & Live Preview)
+
+### Added
+- `Include/UI/UiStrings.mqh`: bilingual EN/FA UI strings.
+- `Include/UI/StatusLog.mqh`: status log implementing `IRejectSink` (central BLOCK/WARN/error capture) for UI.
+- `Include/UI/NewsBanner.mqh`, `Include/UI/SessionBadge.mqh`: news banner (title/time/impact/source tag) and session badge.
+- `Include/UI/DragTool.mqh`: draggable Entry/SL/TP(1-3) chart lines, buy/sell, auto market/pending (limit/stop) inference + override, risk%/manual-lot mode, instability detection, template capture/apply.
+- `Include/UI/PreviewOverlay.mqh`: live lot/risk/RR/spread/type and Risk/Stops/Guards preview (block/warn reasons, no sink side-effects).
+- `Include/UI/PanelShell.mqh`: Mini/Drawer panel shell with controls, hotkeys, confirm/no-silent-send, preflight+send via `ExecutionRouter`.
+- `MoneyManager.mq5`: Phase 4 orchestration (State/Lifecycle/Guards/Router + Drag/UI wiring, live context refresh, `OnTradeTransaction`).
+- Docs: `Docs/phase4-implementation.md`.
+
+### Notes
+- Build verified locally (0 errors/warnings reported). Full persistence (UI state/templates per symbol), ATR snap/RR-lock handles, drawer tabs, visual/virtual SL-TP, and live news/provider-session wiring to be completed in subsequent integration.
+
+## [v0.3.0-phase3] - In progress (Phase 3: Unified Guards)
+
+### Added
+- `Include/Guards/IGuard.mqh`: guard interface, `MM_GuardConfig`, result aggregation primitives.
+- Guards (priority order): `PermissionGuard` (connection/trade/symbol permissions), `PropGuard` (daily/max DD, trades, position size, consistency, weekend warn), `ProtectionGuard` (daily/weekly/monthly loss, profit lock, max DD, trades, cooldown/consec loss), `NewsGuard` (blackout block/warn, offline-stale warn by default with optional block), `SessionSpreadGuard` (session filter, spread max block/warn).
+- `Include/Guards/GuardEngine.mqh`: unified evaluation/`CanExecute`/`Preview`, first-block reporting, **all BLOCK/WARN routed to central `IRejectSink::OnGuardReject`**.
+- `Include/Core/ExecutionRouter.mqh`: integrated guard preflight (sized plan) before send; `MM_ExecResult` includes guard report.
+- Tests/docs: `Tests/Phase3/GuardEngine_Test.mq5`, `Docs/phase3-implementation.md`.
+
+### Notes
+- Runtime config/counters/news-session state to be wired from State/Stats/Prop/News/Session modules; build verified locally (0 errors/warnings reported).
+
+## [v0.2.0-phase2] - In progress (Phase 2: Risk/Execution/Sizing)
+
+### Added
+- `Include/Core/RiskEngine.mqh`: risk basis (Equity/BalanceDay/AllowedDD=min daily/max), per-lot risk via tick value/size, auto & manual sizing, aggregate open-risk + DD remaining caps, conservative step-floor lot normalization, no-SL block, RR calc, live context/open-risk helpers.
+- `Include/Core/StopsValidator.mqh`: stops/freeze min distance, pending type inference, pending/SLTP/margin/volume/trade-mode validation, `ValidatePlan` pre-send gate.
+- `Include/Core/ExecutionPolicy.mqh`: per-symbol/template slippage (deviation), retryable vs terminal retcode policy (frozen set), success/partial handling, retcode reasons, bounded retry executor.
+- `Include/Core/ExecutionRouter.mqh`: preflight (operational gate → risk → stops) and send pipeline with retry and central `IRejectSink` reporting (GuardEngine hook for Phase 3).
+- Phase 2 tests/docs: `Tests/Phase2/{RiskEngine,StopsValidator,ExecutionPolicy}_Test.mq5`, `Docs/phase2-implementation.md`, `Docs/phase2-prep.md`.
+
+### Notes
+- Phase 2 complete when local build/tests (incl. FX/JPY/crypto & cap/retcode scenarios) pass and evidence is recorded/committed.
+
 ## [v0.1.0-phase1] - Unreleased (Phase 1: Foundation)
 
 ### Added

@@ -94,7 +94,7 @@ public:
          if(!HistoryDealSelect(trans.deal)) return;
          ENUM_DEAL_ENTRY entry=(ENUM_DEAL_ENTRY)HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
          MM_TradeEvent ev; ev.Reset();
-         ev.deal=trans.deal; ev.order=trans.order; ev.positionId=trans.position;
+         ev.deal=trans.deal; ev.order=trans.order;          ev.positionId=(long)trans.position;
          ev.symbol=trans.symbol; ev.volume=HistoryDealGetDouble(trans.deal, DEAL_VOLUME);
          ev.price=HistoryDealGetDouble(trans.deal, DEAL_PRICE);
          ev.profit=HistoryDealGetDouble(trans.deal, DEAL_PROFIT);

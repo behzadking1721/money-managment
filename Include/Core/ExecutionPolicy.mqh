@@ -6,6 +6,7 @@
 #define MM_EXECUTION_POLICY_MQH
 
 #include "Contracts.mqh"
+#include <Trade/Trade.mqh>
 
 enum ENUM_MM_PARTIAL_FILL_POLICY
 {
@@ -46,7 +47,6 @@ public:
 
    bool IsTerminalBlock(uint retcode)
    {
-      // No-retry + block/fail with reason (frozen spec set)
       switch(retcode)
       {
          case TRADE_RETCODE_INVALID_STOPS:
@@ -108,6 +108,50 @@ public:
          case TRADE_RETCODE_FIFO_CLOSE: return "FIFO_CLOSE";
          default: return "RETCODE_UNKNOWN";
       }
+   }
+
+   void ApplyPolicyToTrade(CTrade &trade, const MM_ExecPolicy &policy)
+   {
+      trade.SetDeviationInPoints((ulong)policy.maxSlippagePoints);
+      trade.SetTypeFilling(ORDER_FILLING_FOK);
+      // caller may adjust filling/expiration per symbol; default safe
+   }
+
+   // Execute with bounded retries. Caller owns request construction (price/sl/tp/lot) and may reprice between attempts.
+   bool ExecuteWithRetry(CTrade &trade, const MM_TradePlan &plan, const MM_ExecPolicy &policy, MqlTradeResult &outRes)
+   {
+      ZeroMemory(outRes);
+      for(int attempt=0; attempt<=policy.maxRetries; attempt++)
+      {
+         bool sent=false;
+         if(plan.isPending)
+         {
+            sent = trade.OrderOpen(plan.symbol, plan.orderType, plan.lot, 0, plan.entryPrice, plan.slPrice,
+                                   (plan.tpCount>0?plan.tpPrice[0]:0), ORDER_TIME_GTC, 0, plan.comment);
+         }
+         else
+         {
+            ENUM_ORDER_TYPE ot = (plan.side==POSITION_TYPE_BUY)?ORDER_TYPE_BUY:ORDER_TYPE_SELL;
+            sent = trade.PositionOpen(plan.symbol, ot, plan.lot,
+                                      (plan.side==POSITION_TYPE_BUY)?SymbolInfoDouble(plan.symbol,SYMBOL_ASK):SymbolInfoDouble(plan.symbol,SYMBOL_BID),
+                                      plan.slPrice, (plan.tpCount>0?plan.tpPrice[0]:0), plan.comment);
+         }
+         trade.Result(outRes);
+         uint rc = outRes.retcode;
+         if(IsSuccess(rc))
+         {
+            if(rc==TRADE_RETCODE_DONE_PARTIAL && policy.partialFill==MM_FILL_CANCEL_REMAINDER)
+            {
+               // remainder handling is broker/order-type specific; record for caller
+               outRes.comment = "partial_keep_or_cancel_by_caller";
+            }
+            return true;
+         }
+         if(IsTerminalBlock(rc)) return false;
+         if(IsRetryable(rc) && attempt < policy.maxRetries) { Sleep(policy.retryDelayMs); continue; }
+         return false;
+      }
+      return false;
    }
 };
 

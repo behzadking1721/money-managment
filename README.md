@@ -31,6 +31,9 @@ Modular MQL5 money-management EA for **Personal / Prop / Crypto** accounts with 
 - Build and test locally in MetaEditor/MetaTrader 5 (target: **0 errors, 0 warnings**).
 - **Per-phase:** run unit-style scripts in `Tests/` and the manual demo checklist in `Docs/`; record evidence (logs/screens/Strategy Tester outputs when applicable) in `Docs/phase<N>-test-results.md`.
 - **Phase 1:** State serialize/restore (incl. migration/fail-safe), lifecycle event mapping & reject sink, lock/restart behavior — see `Tests/Phase1/` and `Docs/phase1-test-results.md`.
+- **Phase 2:** Risk sizing/RR/caps (auto & manual, no-SL, aggregate/DD), stops/freeze/margin validation, execution retcode policy — see `Tests/Phase2/` and `Docs/phase2-implementation.md`.
+- **Phase 3:** Unified guards (Permission/Prop/Protection/News/Session-Spread), priority, BLOCK/WARN, central reject-sink routing — see `Tests/Phase3/` and `Docs/phase3-implementation.md`.
+- **Phase 4:** Drag & Drop UI & live preview (Entry/SL/TP lines, market/pending inference, lot/risk/RR/guard preview, banner/session/status, hotkeys, confirm/no-silent-send) — see `Docs/phase4-implementation.md` (manual walkthrough).
 - No phase is complete until acceptance tests pass and results are committed.
 
 ## Configuration & Safety

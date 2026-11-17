@@ -22,7 +22,6 @@ struct MM_StopsCheck
 class CStopsValidator
 {
 public:
-   // Returns minimal stop distance in price units (stops level or freeze, whichever stricter, plus spread buffer optional).
    double MinStopDistancePrice(const string symbol)
    {
       int stopsLevel = (int)SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
@@ -33,20 +32,36 @@ public:
       return level * point;
    }
 
+   // Infer pending order type from side and entry vs current market (auto-detect for drag). Returns false if ambiguous/market.
+   bool InferPendingType(bool isBuy, double entry, double currentAsk, double currentBid, ENUM_ORDER_TYPE &outType)
+   {
+      if(isBuy)
+      {
+         if(entry < currentBid){ outType=ORDER_TYPE_BUY_LIMIT; return true; }
+         if(entry > currentAsk){ outType=ORDER_TYPE_BUY_STOP; return true; }
+         return false; // market zone
+      }
+      else
+      {
+         if(entry > currentAsk){ outType=ORDER_TYPE_SELL_LIMIT; return true; }
+         if(entry < currentBid){ outType=ORDER_TYPE_SELL_STOP; return true; }
+         return false;
+      }
+   }
+
    bool ValidatePendingEntry(const string symbol, ENUM_ORDER_TYPE type, double entry, double currentAsk, double currentBid, MM_StopsCheck &out)
    {
       out.Reset();
       double minDist = MinStopDistancePrice(symbol);
       double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
       if(point<=0){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_SYMBOL"; out.messageEN="Invalid symbol point"; return false; }
-      // Basic side/price sanity for pendings relative to market
       switch(type)
       {
          case ORDER_TYPE_BUY_LIMIT:  if(!(entry < currentAsk - minDist)){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_STOPS"; out.messageEN="BuyLimit entry too close/invalid vs Ask"; } break;
          case ORDER_TYPE_SELL_LIMIT: if(!(entry > currentBid + minDist)){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_STOPS"; out.messageEN="SellLimit entry too close/invalid vs Bid"; } break;
          case ORDER_TYPE_BUY_STOP:   if(!(entry > currentAsk + minDist)){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_STOPS"; out.messageEN="BuyStop entry too close/invalid vs Ask"; } break;
          case ORDER_TYPE_SELL_STOP:  if(!(entry < currentBid - minDist)){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_STOPS"; out.messageEN="SellStop entry too close/invalid vs Bid"; } break;
-         default: break; // market checked separately
+         default: break;
       }
       return out.ok;
    }
@@ -68,7 +83,6 @@ public:
          if(!(sl > entry + minDist - 1e-12)){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_STOPS"; out.messageEN="SL too close/below entry for Sell"; }
          if(tp>0 && !(tp < entry - minDist + 1e-12)){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_STOPS"; out.messageEN="TP too close/above entry for Sell"; }
       }
-      // warn if extremely tight (== minDist)
       if(out.ok)
       {
          double slDist=MathAbs(entry-sl);
@@ -77,7 +91,6 @@ public:
       return out.ok;
    }
 
-   // Margin pre-check for requested volume. Blocks if insufficient margin.
    bool ValidateMargin(const string symbol, ENUM_ORDER_TYPE orderType, double volume, double price, MM_StopsCheck &out)
    {
       out.Reset();
@@ -93,8 +106,30 @@ public:
          out.ok=false; out.blocked=true; out.reasonCode="NO_MONEY"; out.messageEN="Insufficient free margin";
          return false;
       }
-      // warn if using large share of free margin
       if(free>0 && margin/free > 0.8) out.Warn("High margin usage (>80% free)");
+      return true;
+   }
+
+   // Full pre-send validation for a TradePlan. Returns first blocking reason; accumulates warnings.
+   bool ValidatePlan(const MM_TradePlan &plan, MM_StopsCheck &out)
+   {
+      out.Reset();
+      string sym=plan.symbol;
+      double ask=SymbolInfoDouble(sym,SYMBOL_ASK), bid=SymbolInfoDouble(sym,SYMBOL_BID);
+      bool isBuy = (plan.side==POSITION_TYPE_BUY);
+      double price = plan.entryPrice>0?plan.entryPrice:(isBuy?ask:bid);
+      if(plan.isPending)
+      {
+         if(!ValidatePendingEntry(sym, plan.orderType, plan.entryPrice, ask, bid, out)) return false;
+      }
+      double tp = plan.tpCount>0?plan.tpPrice[0]:0;
+      if(!ValidateSLTP(sym, isBuy, price, plan.slPrice, tp, out)) return false;
+      ENUM_ORDER_TYPE ot = plan.isPending ? plan.orderType : (isBuy?ORDER_TYPE_BUY:ORDER_TYPE_SELL);
+      if(!ValidateMargin(sym, ot, plan.lot, price, out)) return false;
+      // volume bounds
+      double vmin=SymbolInfoDouble(sym,SYMBOL_VOLUME_MIN), vmax=SymbolInfoDouble(sym,SYMBOL_VOLUME_MAX);
+      if(plan.lot < vmin || plan.lot > vmax){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_VOLUME"; out.messageEN="Lot outside symbol volume limits"; return false; }
+      if(SymbolInfoInteger(sym,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_DISABLED){ out.ok=false; out.blocked=true; out.reasonCode="TRADE_DISABLED"; out.messageEN="Trading disabled for symbol"; return false; }
       return true;
    }
 };
