@@ -42,5 +42,5 @@ Status: **PENDING — NOT EXECUTED** (template). Phase 1 is **not complete** unt
 
 ## Notes / Known Limitations Observed
 - SimpleJson: see `Docs/simplejson-limitations.md`.
-- Netting vs hedging deal normalization: Phase 1 conservative; verify in demo and refine in Phase 2 if gaps found (record here).
+- **Phase 2 tech debt (netting vs hedging):** deal normalization/partial-close and position aggregation parity are Phase 1-conservative; verify in demo, record tested account mode here, and finalize in Phase 2.
 - DoD: **no `v0.1.0-phase1` tag until all required tests pass and evidence is committed/pushed.**

@@ -38,7 +38,7 @@ Version: **1.0** (struct `version` fields enable state migration).
   - `DEAL_ADD` + `DEAL_ENTRY_IN` → `OPEN`. `DEAL_ENTRY_OUT/INOUT` → `CLOSE` (full or position-reducing; consumers may inspect remaining position/volume — hedging/netting aware handling refined in later phases/tests).
   - `REQUEST` failure retcode (not done/placed/partial) → reject sink record. `DONE_PARTIAL` → `PARTIAL_FILL` event carrying filled volume/price from result.
   - `ORDER_UPDATE`/`POSITION` transaction → `MODIFY`.
-- **Netting vs hedging:** MT5 deal stream differs; Phase 1 normalizer is conservative (records deal facts). Full parity for partial-close-in-netting and position aggregation is validated/extended in Phase 2+ with explicit tests.
+- **Netting vs hedging (Phase 2 tech debt):** MT5 deal stream differs by account margin mode; Phase 1 normalizer is conservative (records deal facts). Full parity for partial-close-in-netting and position aggregation is **deferred/validated in Phase 2** with explicit demo tests (record in `Docs/phase1-test-results.md` if only one mode tested).
 - Idempotency: listeners must tolerate duplicate delivery on retry/replay where unavoidable.
 
 ## Phase 1 Decisions (resolved)

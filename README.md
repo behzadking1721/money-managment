@@ -26,9 +26,12 @@ Modular MQL5 money-management EA for **Personal / Prop / Crypto** accounts with 
 3. Use drag-and-drop lines for Entry/SL/TP with live preview; confirm to send (guards must pass).
 4. State persists per account in `MQL5/Files/MoneyManager/` (see `Docs/contracts.md`).
 
-## CI
+## Tests
 
-GitHub Actions workflow `.github/workflows/compile.yml` compiles the EA and Phase 1 test scripts on push/PR (Windows, `fx31337/mql-compile-action`) as an automated build gate. Functional/demo tests and Strategy Tester runs remain local/manual per phase with results recorded in `Docs/phase1-test-results.md`.
+- Build and test locally in MetaEditor/MetaTrader 5 (target: **0 errors, 0 warnings**).
+- **Per-phase:** run unit-style scripts in `Tests/` and the manual demo checklist in `Docs/`; record evidence (logs/screens/Strategy Tester outputs when applicable) in `Docs/phase<N>-test-results.md`.
+- **Phase 1:** State serialize/restore (incl. migration/fail-safe), lifecycle event mapping & reject sink, lock/restart behavior — see `Tests/Phase1/` and `Docs/phase1-test-results.md`.
+- No phase is complete until acceptance tests pass and results are committed.
 
 ## Configuration & Safety
 

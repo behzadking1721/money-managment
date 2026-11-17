@@ -1,27 +1,14 @@
-name: Compile MQL5
+# Disabled: CI/automatic compilation removed by project decision (local MT5 build/test only).
+# This file is kept inert to avoid accidental re-enabling; delete if desired.
+name: Disabled
 
 on:
-  push:
-    branches: [main, "phase*-*"]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
-  compile:
+  noop:
+    if: ${{ false }}
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - run: echo "disabled"
 
-      - name: Compile EA and test scripts
-        uses: fx31337/mql-compile-action@v1
-        with:
-          path: |
-            MoneyManager.mq5
-            Tests/Phase1/SimpleJson_Test.mq5
-            Tests/Phase1/StateStore_Test.mq5
-            Tests/Phase1/Lifecycle_Map_Test.mq5
-          include: .
-          verbose: true
-          # Compilation fails on warnings/errors per action behavior; treat output as gate.

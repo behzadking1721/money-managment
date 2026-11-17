@@ -14,8 +14,9 @@ All notable changes to this project are documented here (phase-based).
 - Phase 1 tests/checklists & scripts: `Tests/Phase1/SimpleJson_Test.mq5`, `StateStore_Test.mq5`, `Lifecycle_Map_Test.mq5`, manual checklist, `Docs/phase1-test-results.md` (pending real execution), `Docs/simplejson-limitations.md`.
 
 ### Notes
-- CI: `.github/workflows/compile.yml` compiles EA and Phase 1 test scripts on push/PR (Windows, automated build gate). Functional/demo & Strategy Tester results remain local and recorded in `Docs/phase1-test-results.md`.
-- **Phase 1 not complete until:** MetaEditor build (0 errors/warnings) and all Phase 1 tests (incl. multi-chart lock, stale-lock recovery, state migration, netting/hedging event cases as applicable) are executed and evidence recorded in `Docs/phase1-test-results.md`, then committed/pushed and tagged `v0.1.0-phase1`.
+- Build and functional testing are performed locally in MetaEditor/MT5; evidence recorded in `Docs/phase1-test-results.md`.
+- **Phase 1 not complete until:** local MetaEditor build (0 errors/warnings) and all Phase 1 tests (incl. multi-chart lock, stale-lock recovery, state migration, netting/hedging event cases as applicable) are executed and evidence recorded in `Docs/phase1-test-results.md`, then committed/pushed and tagged `v0.1.0-phase1`.
+- **Phase 2 tech debt:** netting vs hedging deal/partial-close normalization and position aggregation parity in `TradeLifecycle` (Phase 1 conservative) — validate in demo and finalize in Phase 2.
 - MT5 minimum build: TBD (record after compile verification).
 - SimpleJson is minimal (known/tagged keys only) — see limitations doc.
 
