@@ -1,0 +1,116 @@
+CORE ENGINE
+  ✓ Lot Sizing (5 روش + ATR + DD Scaling)
+  ✓ SL Types (5 روش)
+  ✓ TP / Multi-TP (3 تارگت)
+  ✓ Magic Number Filter
+  ✓ Slippage / Requote Handler
+  ✓ Partial Fill Handler
+  ✓ Retry Logic
+  ✓ Commission در محاسبه لات
+  ✓ ارز حساب خودکار
+  ✓ Symbol Suffix خودکار
+  ✓ Hedge/Netting تشخیص
+  ✓ Min/Max Risk محافظ       ← جدید
+
+ORDER MANAGEMENT
+  ✓ Market / Limit / Stop / OCO
+  ✓ Order Expiry
+  ✓ Scale In / Out
+  ✓ Pending Order Manager
+  ✓ Confirmation Dialog       ← جدید
+
+POSITION MANAGEMENT
+  ✓ Break Even (3 حالت)
+  ✓ Trailing (Fixed / ATR / Candle)
+  ✓ Partial Close (3 مرحله)
+  ✓ Multi-TP (3 تارگت)
+  ✓ Time-based Exit
+  ✓ Hedging Control
+
+PROTECTION
+  ✓ Daily Loss / Profit Limit
+  ✓ Profit Lock
+  ✓ Weekly / Monthly Limit
+  ✓ Max Drawdown
+  ✓ Lot Reduction بعد از ضرر
+  ✓ DD Recovery Mode
+  ✓ Weekend Auto-Close
+  ✓ Swap Warning
+  ✓ Virtual SL/TP
+  ✓ Max Trades Per Day
+  ✓ Cooldown بعد از ضرر
+  ✓ Consecutive Loss Protection
+
+PROP FIRM
+  ✓ Presets + Custom
+  ✓ Challenge vs Funded Mode
+  ✓ DD از Equity یا Balance
+  ✓ Min Trading Days Counter
+  ✓ Consistency Rule
+  ✓ Max Position Size %
+  ✓ Correlation Warning
+  ✓ News Blackout
+
+NEWS & SESSION
+  ✓ FF Calendar + Local Fallback
+  ✓ News Bar افقی (پایین/بالای چارت)
+  ✓ Custom Events
+  ✓ Spread Warning هنگام خبر
+  ✓ Session Display + رنگ‌بندی
+  ✓ Session Overlay روی چارت
+  ✓ DST خودکار
+  ✓ پنل رنگ با سشن عوض میشه
+
+PROFILE SYSTEM
+  ✓ Presets آماده (Conservative / Moderate / Aggressive)
+  ✓ ذخیره پروفایل سفارشی
+  ✓ Import / Export تنظیمات (.set)
+
+ALERTS
+  ✓ Sound / Push / Email / Popup
+  ✓ تنظیم جداگانه برای هر رویداد
+  ✓ Connection Status Alert
+
+UI - پنل اصلی (Mini Bar)
+  ✓ رنگ با سشن عوض میشه
+  ✓ Spread Live
+  ✓ Server Time
+  ✓ Account Type Badge (Demo/Real)
+  ✓ Connection Status
+  ✓ دکمه +/− برای Risk و TP    ← جدید
+  ✓ Toggle % / مبلغ سریع       ← جدید
+  ✓ DRAG ON/OFF سریع           ← جدید
+
+UI - Drawer (6 تب)
+  ✓ Positions (با Quick Bar پایین)
+  ✓ Settings
+  ✓ Prop Firm
+  ✓ Statistics
+  ✓ Log
+  ✓ About / Info               ← جدید
+
+UI - Quick Action Bar
+  ✓ X ALL / X Profit / X Loss
+  ✓ BE ALL
+  ✓ Partial سریع
+  ✓ RR نمایش
+
+UI - تنظیمات ظاهری             ← جدید (کل این بخش)
+  ✓ Font Size (S/M/L)
+  ✓ Panel Size (Compact/Normal/Large)
+  ✓ Opacity
+  ✓ موقعیت پیش‌فرض
+  ✓ Dark / Light / Auto (با سشن)
+  ✓ Draggable + ذخیره موقعیت
+  ✓ Hide/Show با Hotkey (H)
+  ✓ Hotkey راهنما popup
+
+STATISTICS & LOG
+  ✓ Trade Logger CSV
+  ✓ Daily Snapshot
+  ✓ Win Rate / RR / PF
+  ✓ Sharpe / Recovery Factor
+  ✓ Max Consecutive Loss/Win
+  ✓ Average Trade Duration
+  ✓ Last Trade Info روی پنل    ← جدید
+  ✓ Export CSV

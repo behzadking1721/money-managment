@@ -1,46 +1,41 @@
-# Money Manager Expert Advisor
+# Money Manager Expert Advisor (MT5)
 
-A comprehensive MetaTrader 5 (MQL5) Expert Advisor for money management, risk control, position/order management, prop-firm compliance, news/session filters, alerts, statistics and a customizable UI panel.
+Modular MQL5 money-management EA for **Personal / Prop / Crypto** accounts with drag-and-drop trade placement (market & pending), live risk/lot/RR preview, unified pre-send guards, in-trade management, and lifecycle-based statistics.
 
-## Structure
-```
-MoneyManager.mq5          main EA
-Include/
-  Utils/Common.mqh        enums, structs, helpers
-  Core/                   LotSizing, StopLoss, TakeProfit, OrderManager, PositionManager
-  Protection/             Protection (daily limits, drawdown, cooldown, ...)
-  PropFirm/               Prop firm rules & presets
-  News/                   News manager (FF + local fallback)
-  Session/                Session detection, DST, colors
-  Profiles/               Profile presets + import/export .set
-  Alerts/                 Sound/push/email/popup alerts
-  Statistics/             Trade logger CSV + metrics
-  UI/                     Panel (mini bar)
-```
+> Status: **Phase 1 (foundation)** in progress — contracts, file-based StateStore, TradeLifecycle. See `.kilo/plans/1794908270901-mt5-money-management-dragdrop-plan.md` and `CHANGELOG.md`.
 
-## Features
-See task spec: lot sizing (5 methods + ATR + DD scaling), SL (5), TP/Multi-TP (3), magic filter, slippage/requote, partial fills, retries, commission, auto account currency, symbol suffix, hedge/netting detection, min/max risk.
+## Repository Structure
 
-Order management: market/limit/stop/OCO, expiry, scale in/out, pending manager, confirmation.
-
-Position management: break even (3), trailing (fixed/ATR/candle), partial close (3), multi-TP, time-based exit, hedging control.
-
-Protection: daily loss/profit, profit lock, weekly/monthly, max DD, lot reduction after loss, DD recovery, weekend auto-close, swap warning, virtual SL/TP, max trades/day, cooldown, consecutive loss.
-
-Prop firm: presets + custom, challenge/funded, DD from equity/balance, min trading days, consistency, max position size %, correlation warning, news blackout.
-
-News & session: FF calendar + local fallback, news bar, custom events, spread warning, session display + colors, session overlay, auto DST, panel color by session.
-
-Profile system: presets (conservative/moderate/aggressive), save custom, import/export .set.
-
-Alerts: sound/push/email/popup, per-event, connection status.
-
-UI: mini bar (session color, spread live, server time, account badge, connection, +/- risk & TP, toggle %/amount, drag on/off), drawer (6 tabs), quick action bar (X all/profit/loss, BE all, partial, RR), appearance settings (font, size, opacity, position, dark/light/auto, draggable + save pos, hide/show hotkey H, hotkey help).
-
-Statistics & log: trade logger CSV, daily snapshot, win rate/RR/PF, Sharpe/recovery, max consec loss/win, avg duration, last trade info, export CSV.
-
-## Usage
-Attach to a chart. Configure inputs. Hotkey H toggles panel visibility.
+- `Experts/` — EA entry points (`MoneyManager.mq5` / phase entry scripts as added)
+- `Include/` — modular libraries
+  - `Core/` (contracts, risk, stops, execution), `Trade/` (order/position/lifecycle), `Guards/`, `State/`, `News/`, `Session/`, `Profiles/`, `Stats/`, `UI/`
+- `Tests/` — unit-style scripts/helpers and manual checklists per phase
+- `Docs/` — contracts, architecture, phase test results
+- `.kilo/plans/` — frozen implementation plan
 
 ## Build
-Compile MoneyManager.mq5 with MetaEditor (MQL5). Zero errors/warnings.
+
+1. Open MetaEditor (MetaTrader 5, build ≥ current stable; minimum tested build recorded in `CHANGELOG`/release notes).
+2. Place or symlink the repo into your terminal data folder (e.g. `MQL5/Experts` & `MQL5/Include`), or compile from a mapped path.
+3. Compile `Experts/MoneyManager.mq5` (or root `MoneyManager.mq5` during transition). Target: **0 errors, 0 warnings**.
+
+## Run
+
+1. Attach the EA to a chart in MT5.
+2. Select **Account Mode** (Personal / Prop / Crypto) and active profile/template.
+3. Use drag-and-drop lines for Entry/SL/TP with live preview; confirm to send (guards must pass).
+4. State persists per account in `MQL5/Files/MoneyManager/` (see `Docs/contracts.md`).
+
+## CI
+
+GitHub Actions workflow `.github/workflows/compile.yml` compiles the EA and Phase 1 test scripts on push/PR (Windows, `fx31337/mql-compile-action`) as an automated build gate. Functional/demo tests and Strategy Tester runs remain local/manual per phase with results recorded in `Docs/phase1-test-results.md`.
+
+## Configuration & Safety
+
+- Defaults favor safety (prop DD caps, news offline = warn unless blackout configured, multi-position actions opt-in).
+- Back up `MQL5/Files/MoneyManager/` before updates. Profiles/templates/settings support Import/Export (per plan).
+- Source delivery and IP/ownership are defined in the project contract (outside this repository).
+
+## License / Ownership
+
+To be specified in the project/contract agreement.

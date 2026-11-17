@@ -1,0 +1,38 @@
+# MT5 build & runtime artifacts
+*.ex5
+*.ex4
+*.log
+
+# Local data / tester caches
+data/
+MQL5/Files/
+Tester/
+tester/
+*.tlog
+*.dat
+*.hst
+*.fxt
+
+# Sensitive / local configs
+*.set
+*.secret*
+*.env
+
+# Archives & temp
+*.zip
+*.tmp
+*.bak
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local tool/state dirs
+.continue/
+
+# Kilo: track only frozen plans
+.kilo/*
+!.kilo/plans/
+!.kilo/plans/*.md
