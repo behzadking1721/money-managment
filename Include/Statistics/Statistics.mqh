@@ -1,4 +1,4 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //|                                                  Statistics.mqh  |
 //|     Phase 6/7: TradeLogger/Stats, partial aggregation, open risk |
 //+------------------------------------------------------------------+
@@ -158,6 +158,21 @@ private:
             t.openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
          }
       }
+   }
+
+   // Returns true while the tracked position is still present on the server.
+   // Checks by ticket first (POSITION_TICKET == positionId), then by symbol
+   // (netting accounts where the position id equals the position identifier).
+   bool PositionStillOpen(long positionId,const string symbol)
+   {
+      if(positionId==0) return false;
+      if(PositionSelectByTicket((ulong)positionId)) return true;
+      if(symbol!="" && PositionSelect(symbol))
+      {
+         if((long)PositionGetInteger(POSITION_IDENTIFIER)==positionId) return true;
+         if((long)PositionGetInteger(POSITION_TICKET)==positionId) return true;
+      }
+      return false;
    }
 
    void FinalizeTrade(int idx,const MM_TradeEvent &event,double totalProfit,double totalComm,double totalSwap,double totalVol,datetime closeTime,double closePrice)

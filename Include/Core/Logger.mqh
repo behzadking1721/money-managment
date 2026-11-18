@@ -1,4 +1,4 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //|                                                      Logger.mqh  |
 //|                  File logger with rotation (Phase 7)             |
 //+------------------------------------------------------------------+
@@ -22,9 +22,9 @@ private:
       if(!m_ready) return;
       int h=FileOpen(m_path, FILE_READ|FILE_BIN|FILE_COMMON|FILE_SHARE_READ);
       if(h==INVALID_HANDLE) return;
-      long sz=FileSize(h);
+      ulong sz=FileSize(h);
       FileClose(h);
-      if(sz < m_maxBytes) return;
+      if(sz < (ulong)m_maxBytes) return;
       // shift old files: base.(max-1) deleted, ..., base.1 -> base.2, base -> base.1
       string p0=m_path;
       string pN=m_path+"."+(string)m_maxFiles;

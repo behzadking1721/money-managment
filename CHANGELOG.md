@@ -2,7 +2,18 @@
 
 All notable changes to this project are documented here (phase-based).
 
-## [v0.7.0-phase7] - In progress (Phase 7: Hardening)
+## [v1.0.0] - 2026-11-18
+
+### Summary
+- Code-complete for Phases 1–7 (foundation, risk/execution, guards, drag UI/preview, in-trade management, stats/profiles/alerts/CSV, hardening).
+- Phase 7 compile verified in MetaEditor: **0 errors, 0 warnings** (user-reported). `MoneyManager.ex5` built locally.
+- Final documentation added: `Docs/test-checklist.md`, `Docs/tech-debt.md`, `Docs/getting-started.md`, `Docs/architecture.md`.
+- `MM_VERSION` set to `1.0.0` in `Include/Utils/Common.mqh`.
+
+### Notes
+- Pending: final demo validation and Strategy Tester coverage (see `Docs/tech-debt.md`, `Docs/test-checklist.md`). Record evidence in `Docs/phase1-test-results.md` and phase test artifacts as applicable.
+
+## [v0.7.0-phase7] - 2026-11-18 (Phase 7: Hardening)
 
 ### Added
 - `Include/Core/Logger.mqh`: file logger (`g_mmLog`) with rotation/cleanup for EA/guard/execution/trade/news/state events.
@@ -19,7 +30,7 @@ All notable changes to this project are documented here (phase-based).
 - `Include/UI/PanelShell.mqh`, `Include/UI/DragTool.mqh`, `Include/UI/UiStrings.mqh`, `Include/UI/PreviewOverlay.mqh`: expanded bilingual labels/tooltips and UI polish.
 
 ### Notes
-- MetaEditor compile/test not executed by agent; user verification pending (target 0 errors/0 warnings) with demo/script evidence.
+- Compile verified in MetaEditor (0 errors, 0 warnings) per user report. Functional/demo evidence pending.
 
 ## [v0.6.0-phase6] - In progress (Phase 6: Stats, Profiles, Alerts, CSV)
 
@@ -102,4 +113,5 @@ All notable changes to this project are documented here (phase-based).
 
 ## [0.0.1] - Prior state
 - Initial prototype modules and `MoneyManager.mq5`/`MoneyManager.ex5` present before Phase 1 restructure.
+
 
