@@ -1,0 +1,62 @@
+# Technical Debt Register
+
+This register consolidates audit findings for the current baseline. It distinguishes **confirmed defects**, **potential defects**, **limitations**, **legacy code**, **missing integrations**, and **optional improvements**. Items marked **Needs Verification** must not be treated as confirmed bugs without evidence.
+
+**Related existing record:** `Docs/tech-debt.md` (preserved; Phase 7/v1.0.0 follow-ups). This file is a broader, structured audit view.
+
+## Severity & Priority Definitions
+- **Severity:** Critical / High / Medium / Low / Informational
+- **Fix priority:** Immediate (address before or within next release work touching the area) / Deferred (planned, not blocking current documented baseline)
+- **Classification:** Confirmed bug / Potential issue / Limitation / Legacy / Missing integration / Improvement opportunity
+
+## 1. Findings
+
+| ID | File / Function (if known) | Description | Severity | Classification | Impact | Recommended resolution | Fix priority |
+|---|---|---|---|---|---|---|---|
+| TD-01 | `MoneyManager.mq5:6`, `Include/Utils/Common.mqh:61` | Version identifiers differ (`#property version "1.70"` vs `MM_VERSION "1.0.0"`). | Low | Limitation / Improvement opportunity | Potential confusion for users/support/release tagging and diagnostics. | Define and document a single authoritative versioning scheme (or explicitly document mapping) and keep all version surfaces in sync. | Deferred |
+| TD-02 | `MoneyManager.mq5` (risk/guard refresh, deal handling), `Include/Trade/TradeLifecycle.mqh`, `Include/Statistics/Statistics.mqh`, `Docs/phase1-test-results.md` | Full **hedging vs netting** parity (open/partial/close/reverse, multi-position symbols, ticket vs position-id semantics) is not fully validated with recorded evidence. | High | Limitation / Potential issue (environment-dependent) | Incorrect risk aggregation, lifecycle normalization, statistics, or in-trade actions on some account modes. | Execute and record demo/manual (and scripted, where possible) parity tests for hedging and netting; fix discrepancies; update evidence docs. | Immediate (before claiming cross-mode parity) |
+| TD-03 | `Tests/*`, `Docs/phase1-test-results.md`, project-wide | No automated **Strategy Tester** suite; `Docs/phase1-test-results.md` remains pending/not executed template. | Medium | Limitation / Missing integration (test automation) | Regressions in risk/guards/execution/accounting may escape detection. | Add reproducible Strategy Tester scenarios for key flows (risk/DD caps, guards, order lifecycle, stats) and record evidence. | Deferred (plan in Phase 12) |
+| TD-04 | `Include/Protection/Protection.mqh`, `Include/Guards/ProtectionGuard.mqh`, `Include/PropFirm/PropFirm.mqh`, `Include/State/StateStore.mqh`, `MoneyManager.mq5` | **Weekly/monthly** loss tracking/enforcement and prop **consistency/profit-target/min-trading-days** logic are partially implemented or not fully validated across resets/sessions and firm rules. | High | Limitation / Potential issue | Prop/personal protection may be inaccurate or incomplete for specific rule sets or time boundaries. | Validate accounting sources and reset policies; complete rule enforcement where required; document unsupported rules explicitly. | Immediate (for affected prop/risk configurations) |
+| TD-05 | `Include/State/StateStore.mqh`, `Include/Core/SimpleJson.mqh`, `Docs/contracts.md` | State schema/migration/fail-safe and persistence coverage (UI preferences/templates/per-symbol settings/counters) require ongoing verification; `StateStore::IsOperational` must gate all trading/actions. | High | Potential issue / Limitation | Risk of stale/corrupt/partial state use or lost settings after restart/upgrade if gates or migrations are incomplete. | Audit all read/write/gate paths, add migration tests, and verify full restore behavior for required persisted fields. | Immediate (safety-critical paths) |
+| TD-06 | `Include/News/NewsManager.mqh`, `Include/Guards/NewsGuard.mqh`, `Include/UI/NewsBanner.mqh` | Live news provider fetch/parsing (e.g. WebRequest/ForexFactory-style integration), rich impact-to-currency mapping, and real-connectivity resilience are incomplete; manual/cache/staleness paths exist. | Medium | Missing integration / Limitation | News blackout decisions may rely on unavailable/stale/manual data; reduced protection in live conditions. | Implement and harden provider-backed news pipeline with clear source/staleness labeling and fallback policies; validate blackout accuracy. | Deferred |
+| TD-07 | `Include/Core/ExecutionPolicy.mqh`, `Include/Core/ExecutionRouter.mqh` | Broker/order-type-specific **partial-fill remainder** handling and full retcode/filling/expiration coverage remain policy-dependent and not fully validated. | Medium | Limitation / Potential issue | Unexpected remainder orders/positions or misclassified execution outcomes on some brokers/symbols. | Validate per broker/symbol; make remainder policy explicit/configurable where needed; expand retcode handling/tests. | Deferred (validate per deployment broker) |
+| TD-08 | `Include/Statistics/Statistics.mqh`, `Include/Core/RiskEngine.mqh`, `MoneyManager.mq5` (`openRiskMoney`) | **Open-risk estimation** cannot fully quantify positions without SL and may depend on tracked/live fallbacks; manual/unmanaged positions can create uncertainty. | Medium | Limitation | Aggregate risk caps/guard decisions may under- or over-estimate true exposure in edge cases. | Define explicit policy for no-SL/untracked exposure (warn/block/cap/ignore with disclosure) and align stats/risk/guard behavior. | Deferred |
+| TD-09 | `Include/Core/OrderManager.mqh`, `Include/Core/StopLoss.mqh`, `Include/Core/TakeProfit.mqh`, `Include/Core/LotSizing.mqh` | Direct usage in the active `MoneyManager.mq5` execution path is not fully confirmed by static wiring; potential overlap with `ExecutionRouter`/`RiskEngine`/drag planning. | Low | Needs Verification / Potential legacy or auxiliary code | Maintenance burden, confusion about authoritative logic, or dead/duplicated paths. | Trace runtime call graph/usages; document authoritative modules, integrate or deprecate unused/duplicate paths. | Deferred |
+| TD-10 | `Include/UI/Panel.mqh` vs `Include/UI/PanelShell.mqh` | `Panel.mqh` appears to be an alternate/earlier panel implementation not wired by `MoneyManager.mq5`. | Informational | Legacy | Confusion for contributors; risk of accidental edits to non-active UI path. | Mark as legacy in-code/docs or remove/archive when confirmed unused; keep `PanelShell` as canonical UI path. | Deferred |
+| TD-11 | `Include/UI/UiStrings.mqh`, `Include/UI/PanelShell.mqh`, `Include/UI/NewsBanner.mqh` and related UI text | Bilingual (EN/FA) copy/tooltips and encoding consistency require comprehensive audit across terminals/fonts. | Low | Improvement opportunity / Potential issue (UX) | Garbled/missing/inconsistent labels reduce usability and operator safety. | Perform EN/FA UI audit, normalize encoding/strings, and verify rendering in target MT5 environments. | Deferred |
+| TD-12 | `Docs/phase1-test-results.md`, `Docs/test-checklist.md`, `Tests/IntegrationTest.mq5` | Evidence for phase acceptance (especially Phase 1) is pending; integration tests exist but execution/recording is environment-dependent. | Medium | Limitation (process/evidence) | Incomplete traceability for "done" claims and release readiness. | Run required tests in MetaEditor/demo environments, capture logs/results, and update evidence docs. | Deferred (required for formal release sign-off) |
+| TD-13 | `MoneyManager.mq5` (in-trade loop), `Include/Core/PositionManager.mqh` | BE/trailing/time-exit are applied per tick for matching positions based on inputs; interactions with multiple positions, broker conditions, and manual modifications need validation. | Medium | Potential issue / Needs Verification | Unintended modifications or missed actions in specific multi-position/hedging scenarios. | Validate behavior on demo across account modes and position configurations; add safeguards/logging where needed. | Deferred (validate with position-management phase work) |
+| TD-14 | `Include/UI/DragTool.mqh`, `Include/UI/PositionDragTool.mqh` | Advanced UX features referenced in plan/history (ATR snap, RR-lock handles, richer visual vs virtual SL/TP modes) are limited or not fully present. | Low | Improvement opportunity | Reduced planning efficiency/precision compared to target product vision. | Implement incrementally per roadmap with usability testing. | Deferred |
+| TD-15 | `Include/Core/Contracts.mqh` (`MM_MAX_TP_LEVELS`), `Include/Utils/Common.mqh` (`MM_MAX_TP=3`), UI/planner modules | Multi-TP target limits/representations may differ across contracts/constants/UI; roadmap targets optional Multi-TP up to five initially. | Medium | Limitation / Potential issue (design consistency) | Inconsistent TP capacity or behavior between planning, execution, and documentation. | Unify TP limits/contracts and end-to-end behavior; gate by feature flag (disabled by default) and validate execution semantics. | Deferred (Phase 6) |
+| TD-16 | `.github/workflows/compile.yml`, `Tests/*` | CI compile workflow exists but automated test execution/Strategy Tester integration is not evidenced; compile/test guarantees depend on environment setup. | Low | Missing integration / Improvement opportunity | CI may not catch functional regressions. | Extend CI to run available scripted checks where feasible and document/manual-gate remaining validations. | Deferred |
+| TD-17 | `Include/State/StateStore.mqh` (time fallback handling per `Docs/contracts.md`) | Server-time fallback (`TimeTradeServer()` unavailable → `TimeCurrent()` with warning) can affect reset/counter accuracy; UI/operational surfacing must be consistently enforced. | Medium | Limitation / Potential issue | Incorrect daily/session resets or counters in environments with unreliable server time, affecting risk/prop enforcement. | Ensure fallback is logged/surfaced wherever relevant and that reset logic is robust/documented for fallback mode. | Immediate (verify surfacing/gating) |
+| TD-18 | `MoneyManager.ex5` (working tree modified) | Pre-existing modified binary in repository working tree (intentional/unexplained; outside this task). | Informational | Needs Verification | Source/binary drift risk; unclear reproducibility of deployed behavior. | Rebuild from verified source in controlled release process and clarify binary tracking policy. | Deferred |
+
+## 2. Confirmed Bugs (Verified)
+- **None confirmed in this documentation-only audit.** Findings above that may manifest as defects are classified as *Potential issue*, *Limitation*, or *Needs Verification* pending runtime evidence.
+
+## 3. Potential Defects (Require Verification)
+- **TD-02:** Hedging/netting parity gaps in lifecycle/stats/risk/position handling.
+- **TD-04:** Incomplete or inaccurate weekly/monthly/prop-rule enforcement in edge cases.
+- **TD-05:** State persistence/migration/gating gaps under restart/upgrade/corruption scenarios.
+- **TD-07:** Partial-fill remainder and broker-specific retcode/filling behavior.
+- **TD-13:** In-trade automation interactions in multi-position or dynamic conditions.
+- **TD-15:** Inconsistent multi-TP limits/behavior across layers.
+- **TD-17:** Time-fallback impacts on resets/counters if not fully surfaced/gated.
+
+## 4. Limitations & Missing Integrations (Non-bug by Current Design)
+- **TD-03, TD-12, TD-16:** Test automation/evidence gaps.
+- **TD-06:** Live news provider integration depth.
+- **TD-08:** Open-risk quantification without SL/untracked exposure.
+- **TD-14:** Advanced planner/position UX refinements.
+
+## 5. Legacy / Needs Verification
+- **TD-09:** `OrderManager.mqh`, `StopLoss.mqh`, `TakeProfit.mqh`, `LotSizing.mqh` active-path usage/overlap.
+- **TD-10:** `UI/Panel.mqh` legacy/alternate panel.
+- **TD-18:** Pre-existing `MoneyManager.ex5` modification provenance.
+
+## 6. Recommended Immediate Focus (Pre-Implementation Guidance)
+1. **TD-05, TD-17:** Verify state fail-safe gating and time-fallback surfacing for all trading/risk decisions.
+2. **TD-02:** Validate hedging/netting behavior on target account modes before expanding trade-management features.
+3. **TD-04:** Confirm protection/prop accounting correctness for the specific account rules intended for use.
+4. **TD-12:** Capture reproducible compile/test evidence to anchor subsequent development phases.
