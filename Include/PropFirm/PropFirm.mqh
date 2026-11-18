@@ -79,5 +79,44 @@ public:
       return cnt>=3;
    }
    SPropFirmRules GetRules(){return m_rules;}
+   void SetRules(const SPropFirmRules &r){ m_rules=r; m_enabled=true; }
+   void SyncBaseline(double startBalance,double peakEquity){ if(startBalance>0) m_startBalance=startBalance; if(peakEquity>m_peakEquity) m_peakEquity=peakEquity; }
+
+   double DailyLossRef(double dayStartBalance,double dayStartEquity)
+   {
+      if(m_rules.ddReference==DD_FROM_EQUITY) return (dayStartEquity>0)?dayStartEquity:AccountInfoDouble(ACCOUNT_EQUITY);
+      return (dayStartBalance>0)?dayStartBalance:AccountInfoDouble(ACCOUNT_BALANCE);
+   }
+   double MaxDDRef(double startBalance,double peakEquity)
+   {
+      if(m_rules.ddReference==DD_FROM_EQUITY) return (peakEquity>0)?peakEquity:AccountInfoDouble(ACCOUNT_EQUITY);
+      return (startBalance>0)?startBalance:AccountInfoDouble(ACCOUNT_BALANCE);
+   }
+   double DailyLossUsedPct(double dailyLossMoney,double dayStartBalance,double dayStartEquity)
+   {
+      if(!m_enabled || m_rules.maxDailyLoss<=0) return 0.0;
+      double ref=DailyLossRef(dayStartBalance,dayStartEquity); if(ref<=0) return 0.0;
+      return (dailyLossMoney/ref)*100.0;
+   }
+   double TotalDDUsedPct(double currentEquity,double peakEquity,double startBalance)
+   {
+      if(!m_enabled || m_rules.maxTotalDD<=0) return 0.0;
+      double ref=MaxDDRef(startBalance,peakEquity); if(ref<=0) return 0.0;
+      return MathMax(0.0,(ref-currentEquity)/ref*100.0);
+   }
+   double RemainingDailyDDMoney(double dailyLossMoney,double dayStartBalance,double dayStartEquity)
+   {
+      if(!m_enabled || m_rules.maxDailyLoss<=0) return 0.0;
+      double ref=DailyLossRef(dayStartBalance,dayStartEquity); if(ref<=0) return 0.0;
+      return MathMax(0.0, ref*m_rules.maxDailyLoss/100.0 - dailyLossMoney);
+   }
+   double RemainingMaxDDMoney(double currentEquity,double peakEquity,double startBalance)
+   {
+      if(!m_enabled || m_rules.maxTotalDD<=0) return 0.0;
+      double ref=MaxDDRef(startBalance,peakEquity); if(ref<=0) return 0.0;
+      double allowed=ref*m_rules.maxTotalDD/100.0;
+      double used=MathMax(0.0, ref-currentEquity);
+      return MathMax(0.0, allowed-used);
+   }
 };
 #endif

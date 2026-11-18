@@ -1,6 +1,6 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                              ExecutionRouter.mqh |
-//|        Phase 2: pre-send pipeline (risk, stops, exec, reject)    |
+//|      Phase 2/7: pre-send pipeline with logging and edge cases    |
 //+------------------------------------------------------------------+
 #ifndef MM_EXECUTION_ROUTER_MQH
 #define MM_EXECUTION_ROUTER_MQH
@@ -10,6 +10,7 @@
 #include "ExecutionPolicy.mqh"
 #include "RejectSink.mqh"
 #include "Contracts.mqh"
+#include "Logger.mqh"
 #include "../Guards/GuardEngine.mqh"
 #include "../State/StateStore.mqh"
 #include "../Trade/TradeLifecycle.mqh"
@@ -44,6 +45,7 @@ private:
    {
       res.allowed=false; res.sent=false; res.reasonCode=code; res.messageEN=msg;
       if(m_sink!=NULL) m_sink.OnExecutionReject(symbol,code,msg,ret,ctx);
+      g_mmLog.Warn("EXEC_REJECT_ROUTE",symbol+" "+code+" rc="+(string)ret+" ctx="+ctx+" "+msg);
    }
 
 public:
@@ -58,7 +60,6 @@ public:
 
    CTrade* Trade(){ return GetPointer(m_trade); }
 
-   // Build a TradePlan helper (market or pending). Entry for market can be 0 to use Ask/Bid.
    void BuildPlan(MM_TradePlan &plan, const string symbol, bool isBuy, bool pending, ENUM_ORDER_TYPE pendingType,
                   double entry, double sl, const double &tps[], int tpCount, double lotOrRisk,
                   ENUM_MM_SIZING_MODE sizingMode, const string templateId, long magic, int slippage)
@@ -76,10 +77,10 @@ public:
       plan.serverTime=TimeTradeServer();
    }
 
-   // Preflight: compute risk, validate stops/margin, then evaluate guards. Does not send.
    bool Preflight(const MM_TradePlan &inPlan, MM_RiskContext &ctx, const MM_ExecPolicy &policy, MM_ExecResult &out, MM_GuardConfig &guardCfg)
    {
       out.Reset();
+      if(inPlan.symbol==""){ Reject(inPlan.symbol,"INVALID_SYMBOL","Empty symbol",0,"preflight",out); return false; }
       if(m_store!=NULL && !m_store.IsOperational())
       { Reject(inPlan.symbol,"STATE_NOT_OPERATIONAL","State store non-operational; trading blocked",0,"preflight",out); return false; }
       MM_TradePlan plan=inPlan; plan.slippagePoints=policy.maxSlippagePoints;
@@ -98,6 +99,7 @@ public:
             out.allowed=false;
             out.reasonCode = out.guards.firstBlock.reasonCode;
             out.messageEN  = out.guards.firstBlock.messageEN;
+            g_mmLog.Warn("GUARD_BLOCK",inPlan.symbol+" "+out.reasonCode);
             return false;
          }
       }
@@ -105,17 +107,17 @@ public:
       return true;
    }
 
-   // Preflight (incl. guards) + send with execution policy and retry. Blocks/Warns from guards go to central sink.
    bool Send(MM_TradePlan &plan, MM_RiskContext &ctx, MM_ExecPolicy &policy, MM_ExecResult &out, MM_GuardConfig &guardCfg)
    {
       out.Reset();
       if(!Preflight(plan, ctx, policy, out, guardCfg)) return false;
-      plan.lot = out.risk.lot; // sized lot
+      plan.lot = out.risk.lot;
       m_exec.ApplyPolicyToTrade(m_trade, policy);
       if(m_magic==0 && plan.magic!=0){ m_magic=(ulong)plan.magic; m_trade.SetExpertMagicNumber(m_magic); }
+      if(m_magic!=0 && plan.magic==0) plan.magic=(long)m_magic;
       bool ok = m_exec.ExecuteWithRetry(m_trade, plan, policy, out.tradeResult);
       uint rc = out.tradeResult.retcode;
-      if(ok){ out.sent=true; out.allowed=true; out.reasonCode=m_exec.RetcodeReason(rc); out.messageEN="Order sent"; return true; }
+      if(ok){ out.sent=true; out.allowed=true; out.reasonCode=m_exec.RetcodeReason(rc); out.messageEN="Order sent"; g_mmLog.Info("SEND_OK",plan.symbol+" rc="+(string)rc); return true; }
       string reason=m_exec.RetcodeReason(rc);
       Reject(plan.symbol, reason, (out.tradeResult.comment!="")?out.tradeResult.comment:reason, rc, "exec", out);
       out.tradeResult.retcode=rc;

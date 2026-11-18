@@ -46,7 +46,7 @@ private:
    MM_DragTemplate m_tpl;
 
    string N(const string s){ return m_prefix+s; }
-   void SetHLine(const string name,double price,color clr,int style,int width,bool selectable=true)
+   void SetHLine(const string name,double price,color clr,int style,int width,bool selectable=true,const string tooltip="")
    {
       if(ObjectFind(m_chart,name)<0) ObjectCreate(m_chart,name,OBJ_HLINE,0,0,price);
       ObjectSetDouble(m_chart,name,OBJPROP_PRICE,price);
@@ -57,6 +57,7 @@ private:
       ObjectSetInteger(m_chart,name,OBJPROP_SELECTED,selectable);
       ObjectSetInteger(m_chart,name,OBJPROP_BACK,false);
       ObjectSetInteger(m_chart,name,OBJPROP_HIDDEN,true);
+      if(tooltip!="") ObjectSetString(m_chart,name,OBJPROP_TOOLTIP,tooltip);
    }
    double GetHLine(const string name,double defv)
    {
@@ -72,11 +73,12 @@ private:
       if(m_tp1==0) m_tp1 = m_isBuy? m_entry+400*pt : m_entry-400*pt;
       if(m_tpCount>=2 && m_tp2==0) m_tp2 = m_isBuy? m_entry+600*pt : m_entry-600*pt;
       if(m_tpCount>=3 && m_tp3==0) m_tp3 = m_isBuy? m_entry+800*pt : m_entry-800*pt;
-      SetHLine(N("Entry"),m_entry, m_isBuy?clrDodgerBlue:clrTomato, STYLE_SOLID, 2, true);
-      SetHLine(N("SL"),   m_sl,    clrRed,    STYLE_SOLID, 2, true);
-      SetHLine(N("TP1"),  m_tp1,   clrLimeGreen, STYLE_DASH, 1, true);
-      if(m_tpCount>=2) SetHLine(N("TP2"),m_tp2,clrGreen,STYLE_DOT,1,true); else if(ObjectFind(m_chart,N("TP2"))>=0) ObjectDelete(m_chart,N("TP2"));
-      if(m_tpCount>=3) SetHLine(N("TP3"),m_tp3,clrGreen,STYLE_DOT,1,true); else if(ObjectFind(m_chart,N("TP3"))>=0) ObjectDelete(m_chart,N("TP3"));
+      string dir = m_isBuy?"BUY":"SELL";
+      SetHLine(N("Entry"),m_entry, m_isBuy?clrDodgerBlue:clrTomato, STYLE_SOLID, 2, true, dir+" Entry / ورود");
+      SetHLine(N("SL"),   m_sl,    clrRed,    STYLE_SOLID, 2, true, "Stop Loss / حد ضرر");
+      SetHLine(N("TP1"),  m_tp1,   clrLimeGreen, STYLE_DASH, 1, true, "Take Profit 1 / حد سود 1");
+      if(m_tpCount>=2) SetHLine(N("TP2"),m_tp2,clrGreen,STYLE_DOT,1,true,"Take Profit 2 / حد سود 2"); else if(ObjectFind(m_chart,N("TP2"))>=0) ObjectDelete(m_chart,N("TP2"));
+      if(m_tpCount>=3) SetHLine(N("TP3"),m_tp3,clrGreen,STYLE_DOT,1,true,"Take Profit 3 / حد سود 3"); else if(ObjectFind(m_chart,N("TP3"))>=0) ObjectDelete(m_chart,N("TP3"));
    }
 
 public:

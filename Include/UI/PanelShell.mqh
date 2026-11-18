@@ -49,7 +49,7 @@ private:
       ObjectSetInteger(m_chart,name,OBJPROP_SELECTABLE,false); ObjectSetInteger(m_chart,name,OBJPROP_HIDDEN,true);
       ObjectSetInteger(m_chart,name,OBJPROP_ZORDER,0);
    }
-   void Lbl(const string name,int x,int y,const string text,color clr=clrWhite,int size=9)
+   void Lbl(const string name,int x,int y,const string text,color clr=clrWhite,int size=9,const string tip="")
    {
       if(ObjectFind(m_chart,name)<0) ObjectCreate(m_chart,name,OBJ_LABEL,0,0,0);
       ObjectSetInteger(m_chart,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
@@ -57,8 +57,9 @@ private:
       ObjectSetInteger(m_chart,name,OBJPROP_COLOR,clr); ObjectSetInteger(m_chart,name,OBJPROP_FONTSIZE,size);
       ObjectSetString(m_chart,name,OBJPROP_TEXT,text); ObjectSetString(m_chart,name,OBJPROP_FONT,"Arial");
       ObjectSetInteger(m_chart,name,OBJPROP_SELECTABLE,false); ObjectSetInteger(m_chart,name,OBJPROP_HIDDEN,true);
+      if(tip!="") ObjectSetString(m_chart,name,OBJPROP_TOOLTIP,tip);
    }
-   void Btn(const string name,int x,int y,int w,int h,const string text,color bg=clrSlateGray,color fg=clrWhite)
+   void Btn(const string name,int x,int y,int w,int h,const string text,color bg=clrSlateGray,color fg=clrWhite,const string tip="")
    {
       if(ObjectFind(m_chart,name)<0) ObjectCreate(m_chart,name,OBJ_BUTTON,0,0,0);
       ObjectSetInteger(m_chart,name,OBJPROP_CORNER,CORNER_LEFT_UPPER);
@@ -69,6 +70,7 @@ private:
       ObjectSetString(m_chart,name,OBJPROP_FONT,"Arial");
       ObjectSetInteger(m_chart,name,OBJPROP_SELECTABLE,false); ObjectSetInteger(m_chart,name,OBJPROP_HIDDEN,true);
       ObjectSetInteger(m_chart,name,OBJPROP_ZORDER,10);
+      if(tip!="") ObjectSetString(m_chart,name,OBJPROP_TOOLTIP,tip);
    }
    void ShowObj(const string name,bool show)
    { if(ObjectFind(m_chart,name)>=0) ObjectSetInteger(m_chart,name,OBJPROP_TIMEFRAMES, show?OBJ_ALL_PERIODS:OBJ_NO_PERIODS); }
@@ -102,40 +104,40 @@ public:
    {
       int w = m_mini?m_wMini:m_wDrawer; int h = m_mini?m_hMini:m_hDrawer;
       Rect(N("BG"), m_x, m_y, w, h, C'28,32,38', C'60,70,85');
-      Lbl(N("Title"), m_x+8, m_y+6, "Money Manager", clrWhite, 10);
-      Btn(N("Lang"), m_x+w-46, m_y+6, 38, 18, m_langFA?"FA":"EN", clrTeal);
-      Btn(N("Mini"), m_x+w-90, m_y+6, 38, 18, m_mini?m_ui.S_Drawer():m_ui.S_Mini(), clrSlateGray);
+      Lbl(N("Title"), m_x+8, m_y+6, "Money Manager ["+ModeLabel()+"]", clrWhite, 10);
+      Btn(N("Lang"), m_x+w-46, m_y+6, 38, 18, m_langFA?"FA":"EN", clrTeal, clrWhite, m_ui.Tip_Lang());
+      Btn(N("Mini"), m_x+w-90, m_y+6, 38, 18, m_mini?m_ui.S_Drawer():m_ui.S_Mini(), clrSlateGray, clrWhite, m_ui.Tip_Mini());
       Lbl(N("Info1"), m_x+8, m_y+28, "", clrSilver, 9);
       Lbl(N("Info2"), m_x+8, m_y+44, "", clrSilver, 9);
       int by = m_y + 64;
-      Btn(N("Buy"),  m_x+8,   by, 44, 20, m_ui.S_Buy(), clrSeaGreen);
-      Btn(N("Sell"), m_x+56,  by, 44, 20, m_ui.S_Sell(), clrIndianRed);
-      Btn(N("Drag"), m_x+104, by, 50, 20, m_ui.S_DragMode(), m_dragMode?clrDarkOrange:clrSlateGray);
-      Btn(N("Send"), m_x+158, by, 56, 20, m_ui.T("Send","Send"), clrSteelBlue);
-      Btn(N("Clr"),  m_x+218, by, 40, 20, m_ui.T("Clr","Clr"), clrDimGray);
+      Btn(N("Buy"),  m_x+8,   by, 44, 20, m_ui.S_Buy(), clrSeaGreen, clrWhite, m_ui.Tip_Buy());
+      Btn(N("Sell"), m_x+56,  by, 44, 20, m_ui.S_Sell(), clrIndianRed, clrWhite, m_ui.Tip_Sell());
+      Btn(N("Drag"), m_x+104, by, 50, 20, m_ui.S_DragMode(), m_dragMode?clrDarkOrange:clrSlateGray, clrWhite, m_ui.Tip_Drag());
+      Btn(N("Send"), m_x+158, by, 56, 20, m_ui.S_Send(), clrSteelBlue, clrWhite, m_ui.Tip_Send());
+      Btn(N("Clr"),  m_x+218, by, 40, 20, m_ui.S_Clear(), clrDimGray, clrWhite, m_ui.Tip_Clear());
       if(!m_mini)
       {
-         Btn(N("TabM"), m_x+262, m_y+28, 36, 16, m_ui.S_Main(), (m_tab==0)?clrDarkSlateBlue:clrSlateGray);
-         Btn(N("TabS"), m_x+262, m_y+46, 36, 16, m_ui.S_Stats(), (m_tab==1)?clrDarkSlateBlue:clrSlateGray);
+         Btn(N("TabM"), m_x+262, m_y+28, 36, 16, m_ui.S_Main(), (m_tab==0)?clrDarkSlateBlue:clrSlateGray, clrWhite, m_ui.Tip_TabMain());
+         Btn(N("TabS"), m_x+262, m_y+46, 36, 16, m_ui.S_Stats(), (m_tab==1)?clrDarkSlateBlue:clrSlateGray, clrWhite, m_ui.Tip_TabStats());
 
          Lbl(N("Info3"), m_x+8, m_y+88, "", clrSilver, 9);
          Lbl(N("Info4"), m_x+8, m_y+104, "", clrKhaki, 9);
          Lbl(N("Help"),  m_x+8, m_y+120, m_ui.S_Help(), clrGray, 8);
 
-         Btn(N("RiskDn"), m_x+8,  m_y+142, 36, 18, "-R", clrSlateGray);
-         Btn(N("RiskUp"), m_x+48, m_y+142, 36, 18, "+R", clrSlateGray);
-         Btn(N("RRLock"), m_x+88, m_y+142, 50, 18, "RR", clrSlateGray);
-         Btn(N("TplS"),   m_x+142,m_y+142, 44, 18, m_ui.T("Save","Save"), clrSlateGray);
-         Btn(N("PosSel"), m_x+190,m_y+142, 48, 18, "Pos", clrDarkCyan);
-         Btn(N("BE"),     m_x+242,m_y+142, 28, 18, "BE", clrTeal);
-         Btn(N("Trail"),  m_x+274,m_y+142, 34, 18, "Trl", clrTeal);
-         Btn(N("PClose"), m_x+8,  m_y+164, 48, 18, "50%", clrMaroon);
-         Btn(N("PCAll"),  m_x+60, m_y+164, 56, 18, "All", clrMaroon);
+         Btn(N("RiskDn"), m_x+8,  m_y+142, 36, 18, "-R", clrSlateGray, clrWhite, m_ui.Tip_RiskDn());
+         Btn(N("RiskUp"), m_x+48, m_y+142, 36, 18, "+R", clrSlateGray, clrWhite, m_ui.Tip_RiskUp());
+         Btn(N("RRLock"), m_x+88, m_y+142, 50, 18, "RR", clrSlateGray, clrWhite, m_ui.T("Toggle RR lock","تغییر قفل نسبت R"));
+         Btn(N("TplS"),   m_x+142,m_y+142, 44, 18, m_ui.S_Save(), clrSlateGray, clrWhite, m_ui.Tip_Save());
+         Btn(N("PosSel"), m_x+190,m_y+142, 48, 18, m_ui.S_Pos(), clrDarkCyan, clrWhite, m_ui.Tip_Pos());
+         Btn(N("BE"),     m_x+242,m_y+142, 28, 18, m_ui.S_BE(), clrTeal, clrWhite, m_ui.Tip_BE());
+         Btn(N("Trail"),  m_x+274,m_y+142, 34, 18, m_ui.S_Trail(), clrTeal, clrWhite, m_ui.Tip_Trail());
+         Btn(N("PClose"), m_x+8,  m_y+164, 48, 18, m_ui.S_Partial(), clrMaroon, clrWhite, m_ui.Tip_Partial());
+         Btn(N("PCAll"),  m_x+60, m_y+164, 56, 18, m_ui.S_CloseAll(), clrMaroon, clrWhite, m_ui.Tip_CloseAll());
 
-         Btn(N("CSV"),   m_x+8,   m_y+142, 44, 18, m_ui.S_CSV(), clrDarkOliveGreen);
-         Btn(N("ProfN"), m_x+56,  m_y+142, 52, 18, m_ui.S_Next(), clrDarkSlateBlue);
-         Btn(N("PrEx"),  m_x+112, m_y+142, 52, 18, m_ui.S_Export(), clrDarkSlateBlue);
-         Btn(N("PrIm"),  m_x+168, m_y+142, 52, 18, m_ui.S_Import(), clrDarkSlateBlue);
+         Btn(N("CSV"),   m_x+8,   m_y+142, 44, 18, m_ui.S_CSV(), clrDarkOliveGreen, clrWhite, m_ui.Tip_CSV());
+         Btn(N("ProfN"), m_x+56,  m_y+142, 52, 18, m_ui.S_Next(), clrDarkSlateBlue, clrWhite, m_ui.Tip_ProfileNext());
+         Btn(N("PrEx"),  m_x+112, m_y+142, 52, 18, m_ui.S_Export(), clrDarkSlateBlue, clrWhite, m_ui.Tip_ProfileExport());
+         Btn(N("PrIm"),  m_x+168, m_y+142, 52, 18, m_ui.S_Import(), clrDarkSlateBlue, clrWhite, m_ui.Tip_ProfileImport());
 
          Lbl(N("Log"), m_x+8, m_y+188, "", clrLightGray, 8);
       }
@@ -186,9 +188,9 @@ public:
       string conn = TerminalInfoInteger(TERMINAL_CONNECTED)?"OK":"OFF";
       string perm = (TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && MQLInfoInteger(MQL_TRADE_ALLOWED))?"OK":"NO";
       Lbl(N("Info1"), m_x+8, m_y+28, m_ui.S_Spread()+": "+DoubleToString(sp,1)+"  "+m_ui.S_Connection()+":"+conn+"/"+perm, clrSilver, 9);
-      string modeStr = drag.Active()? (drag.IsBuy()?m_ui.S_Buy():m_ui.S_Sell()) : m_ui.T("Idle","Idle");
+      string modeStr = drag.Active()? (drag.IsBuy()?m_ui.S_Buy():m_ui.S_Sell()) : m_ui.S_Idle();
       string smode = (drag.SizingMode()==SIZING_AUTO_RISK)? (m_ui.S_Risk()+"%") : m_ui.S_Lot();
-      Lbl(N("Info2"), m_x+8, m_y+44, m_ui.T("Mode","Mode")+": "+modeStr+"  "+smode+": "+DoubleToString(drag.RiskValue(),2), clrSilver, 9);
+      Lbl(N("Info2"), m_x+8, m_y+44, m_ui.S_Mode()+": "+modeStr+"  "+smode+": "+DoubleToString(drag.RiskValue(),2), clrSilver, 9);
 
       if(!m_mini)
       {
@@ -314,7 +316,7 @@ public:
       if(!drag.Active() || !drag.Ready()){ status.Warn("SEND","No active plan"); return false; }
       if(drag.InstabilityWarn())
       {
-         int r = MessageBox(m_ui.T("Spread/price unstable. Send anyway?","Unstable. Send anyway?"), "MoneyManager", MB_YESNO|MB_ICONWARNING);
+         int r = MessageBox(m_ui.T("Spread/price unstable. Send anyway?","اسپرد/قیمت ناپایدار است. ارسال شود؟"), "MoneyManager", MB_YESNO|MB_ICONWARNING);
          if(r!=IDYES){ status.Info("SEND",m_ui.S_Cancelled()); return false; }
       }
       MM_ExecResult chk; MM_TradePlan plan; drag.BuildPlan(plan);

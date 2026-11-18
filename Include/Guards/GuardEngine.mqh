@@ -86,12 +86,20 @@ public:
       return rep.allowed;
    }
 
-   // Helper: fill common live fields (connection/spread). Caller fills limits/counters/news flags.
+   // Helper: fill common live fields (spread). Caller fills limits/counters/news/DD flags.
    void FillLiveConfig(const MM_TradePlan &plan, MM_GuardConfig &cfg)
    {
       double ask=SymbolInfoDouble(plan.symbol,SYMBOL_ASK), bid=SymbolInfoDouble(plan.symbol,SYMBOL_BID);
       double pt=SymbolInfoDouble(plan.symbol,SYMBOL_POINT);
       if(pt>0) cfg.spreadPoints=(ask-bid)/pt;
+   }
+
+   // Apply news manager state (Phase 7 wiring)
+   void ApplyNewsState(MM_GuardConfig &cfg, bool hasData, bool isStale, bool inBlackout)
+   {
+      cfg.newsDataAvailable = hasData;
+      cfg.newsIsStale = isStale;
+      cfg.newsInBlackout = inBlackout;
    }
 };
 

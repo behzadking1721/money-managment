@@ -1,11 +1,12 @@
-//+------------------------------------------------------------------+
-//|                                            ExecutionPolicy.mqh   |
-//|   Phase 2: slippage, retcode retry/terminal, partial-fill policy |
+﻿//+------------------------------------------------------------------+
+//|                                              ExecutionPolicy.mqh |
+//|   Phase 2/7: slippage, retcode policy, retry, unknown logging    |
 //+------------------------------------------------------------------+
 #ifndef MM_EXECUTION_POLICY_MQH
 #define MM_EXECUTION_POLICY_MQH
 
 #include "Contracts.mqh"
+#include "Logger.mqh"
 #include <Trade/Trade.mqh>
 
 enum ENUM_MM_PARTIAL_FILL_POLICY
@@ -106,7 +107,9 @@ public:
          case TRADE_RETCODE_CLOSE_ORDER_EXIST: return "CLOSE_ORDER_EXIST";
          case TRADE_RETCODE_LIMIT_VOLUME: return "LIMIT_VOLUME";
          case TRADE_RETCODE_FIFO_CLOSE: return "FIFO_CLOSE";
-         default: return "RETCODE_UNKNOWN";
+         default:
+            g_mmLog.Warn("RETCODE_UNKNOWN","Unknown trade retcode="+(string)retcode);
+            return "RETCODE_UNKNOWN";
       }
    }
 
@@ -117,7 +120,6 @@ public:
       // caller may adjust filling/expiration per symbol; default safe
    }
 
-   // Execute with bounded retries. Caller owns request construction (price/sl/tp/lot) and may reprice between attempts.
    bool ExecuteWithRetry(CTrade &trade, const MM_TradePlan &plan, const MM_ExecPolicy &policy, MqlTradeResult &outRes)
    {
       ZeroMemory(outRes);
@@ -138,17 +140,32 @@ public:
          }
          trade.Result(outRes);
          uint rc = outRes.retcode;
+         string reason = RetcodeReason(rc);
          if(IsSuccess(rc))
          {
-            if(rc==TRADE_RETCODE_DONE_PARTIAL && policy.partialFill==MM_FILL_CANCEL_REMAINDER)
+            if(rc==TRADE_RETCODE_DONE_PARTIAL)
             {
-               // remainder handling is broker/order-type specific; record for caller
-               outRes.comment = "partial_keep_or_cancel_by_caller";
+               g_mmLog.Warn("PARTIAL_FILL","symbol="+plan.symbol+" vol="+DoubleToString(outRes.volume,2)+" req="+DoubleToString(plan.lot,2)+" policy="+(string)((int)policy.partialFill));
+               if(policy.partialFill==MM_FILL_CANCEL_REMAINDER)
+                  outRes.comment = "partial_keep_or_cancel_by_caller";
             }
+            g_mmLog.Info("EXEC_OK",plan.symbol+" "+reason+" vol="+DoubleToString(outRes.volume,2)+" deal="+(string)outRes.deal+" order="+(string)outRes.order);
             return true;
          }
-         if(IsTerminalBlock(rc)) return false;
-         if(IsRetryable(rc) && attempt < policy.maxRetries) { Sleep(policy.retryDelayMs); continue; }
+         if(IsTerminalBlock(rc))
+         {
+            g_mmLog.Error("EXEC_BLOCK",plan.symbol+" "+reason+" rc="+(string)rc+" "+outRes.comment);
+            return false;
+         }
+         if(IsRetryable(rc))
+         {
+            g_mmLog.Warn("EXEC_RETRY",plan.symbol+" "+reason+" rc="+(string)rc+" attempt="+(string)(attempt+1));
+            if(attempt < policy.maxRetries) { Sleep(policy.retryDelayMs); continue; }
+         }
+         else
+         {
+            g_mmLog.Warn("RETCODE_UNCLASSIFIED",plan.symbol+" rc="+(string)rc+" "+reason+" "+outRes.comment);
+         }
          return false;
       }
       return false;

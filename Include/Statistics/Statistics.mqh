@@ -1,11 +1,12 @@
 ﻿//+------------------------------------------------------------------+
 //|                                                  Statistics.mqh  |
-//|        Phase 6: TradeLogger/Stats from OnTradeTransaction events |
+//|     Phase 6/7: TradeLogger/Stats, partial aggregation, open risk |
 //+------------------------------------------------------------------+
 #ifndef MM_STATISTICS_MQH
 #define MM_STATISTICS_MQH
 
 #include "../Core/Contracts.mqh"
+#include "../Core/Logger.mqh"
 #include "../Utils/Common.mqh"
 
 #define MM_MAX_CLOSED_TRADES 500
@@ -17,14 +18,20 @@ struct MM_OpenTradeTrack
    ulong    ticket;
    string   symbol;
    ENUM_POSITION_TYPE side;
-   double   volume;
+   double   volumeInitial;
+   double   volumeRemain;
    double   openPrice;
    double   sl;
    double   initialRiskMoney;
+   double   realizedProfit;
+   double   realizedCommission;
+   double   realizedSwap;
+   double   closedVolume;
    datetime openTime;
+   datetime lastEventTime;
    ENUM_MM_ACCOUNT_MODE accountMode;
    bool     active;
-   void Reset(){ positionId=0; ticket=0; symbol=""; side=POSITION_TYPE_BUY; volume=0; openPrice=0; sl=0; initialRiskMoney=0; openTime=0; accountMode=ACCOUNT_PERSONAL; active=false; }
+   void Reset(){ positionId=0; ticket=0; symbol=""; side=POSITION_TYPE_BUY; volumeInitial=0; volumeRemain=0; openPrice=0; sl=0; initialRiskMoney=0; realizedProfit=0; realizedCommission=0; realizedSwap=0; closedVolume=0; openTime=0; lastEventTime=0; accountMode=ACCOUNT_PERSONAL; active=false; }
 };
 
 struct MM_ClosedTrade
@@ -124,25 +131,133 @@ private:
       return (slDist/tickSize)*tickVal*volume;
    }
 
+   double RemainingRisk(const MM_OpenTradeTrack &t)
+   {
+      if(t.volumeRemain<=0) return 0;
+      double r=CalcInitialRisk(t.symbol,t.openPrice,t.sl,t.volumeRemain);
+      if(r<=0 && t.volumeInitial>0) r = t.initialRiskMoney * (t.volumeRemain / t.volumeInitial);
+      return r;
+   }
+
+   void SyncOpenFromPosition(MM_OpenTradeTrack &t)
+   {
+      if(t.positionId==0) return;
+      if(PositionSelectByTicket((ulong)t.positionId))
+      {
+         t.volumeRemain = PositionGetDouble(POSITION_VOLUME);
+         t.sl = PositionGetDouble(POSITION_SL);
+         t.openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         return;
+      }
+      if(t.symbol!="" && PositionSelect(t.symbol))
+      {
+         if((long)PositionGetInteger(POSITION_IDENTIFIER)==t.positionId || (long)PositionGetInteger(POSITION_TICKET)==t.positionId)
+         {
+            t.volumeRemain = PositionGetDouble(POSITION_VOLUME);
+            t.sl = PositionGetDouble(POSITION_SL);
+            t.openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         }
+      }
+   }
+
+   void FinalizeTrade(int idx,const MM_TradeEvent &event,double totalProfit,double totalComm,double totalSwap,double totalVol,datetime closeTime,double closePrice)
+   {
+      if(idx<0 || idx>=m_openCount || !m_open[idx].active) return;
+      MM_OpenTradeTrack tr=m_open[idx];
+      MM_ClosedTrade t; t.Reset();
+      t.positionId=tr.positionId; t.ticket=(tr.ticket!=0?tr.ticket:(event.ticket!=0?event.ticket:event.order));
+      t.symbol=(tr.symbol!=""?tr.symbol:event.symbol);
+      t.openTime=tr.openTime; t.closeTime=closeTime;
+      t.openPrice=tr.openPrice; t.closePrice=closePrice;
+      t.volume=(totalVol>0?totalVol:(tr.volumeInitial>0?tr.volumeInitial:tr.closedVolume));
+      t.profit=totalProfit; t.commission=totalComm; t.swap=totalSwap;
+      t.typeStr=(tr.side==POSITION_TYPE_BUY)?"BUY":"SELL";
+      t.accountMode=tr.accountMode;
+      t.durationSec=(t.openTime>0 && t.closeTime>=t.openTime)? (long)(t.closeTime-t.openTime) : 0;
+      double initRisk=tr.initialRiskMoney; if(initRisk<=0) initRisk=CalcInitialRisk(t.symbol,t.openPrice,tr.sl,tr.volumeInitial);
+      double net=t.profit+t.commission+t.swap;
+      t.rMultiple=(initRisk>0)?(net/initRisk):0.0;
+      PushClosed(t);
+      m_open[idx].active=false;
+   }
+
    void HandleOpen(const MM_TradeEvent &event)
    {
-      int idx = AllocOpen();
+      int idx = FindOpenByPos(event.positionId);
+      if(idx>=0 && m_open[idx].active)
+      {
+         // netting add/scale-in: increase volume and risk baseline
+         double addVol=event.volume;
+         if(addVol>0)
+         {
+            m_open[idx].volumeInitial += addVol;
+            m_open[idx].volumeRemain += addVol;
+            m_open[idx].openPrice = (event.price>0)?event.price:m_open[idx].openPrice;
+         }
+         m_open[idx].lastEventTime=(event.timeServer!=0?event.timeServer:TimeCurrent());
+         return;
+      }
+      idx = AllocOpen();
       m_open[idx].Reset();
       m_open[idx].active=true;
       m_open[idx].positionId=event.positionId;
       m_open[idx].ticket=(event.ticket!=0?event.ticket:event.order);
       m_open[idx].symbol=event.symbol;
       m_open[idx].side=event.side;
-      m_open[idx].volume=event.volume;
+      m_open[idx].volumeInitial=event.volume;
+      m_open[idx].volumeRemain=event.volume;
       m_open[idx].openPrice=event.price;
       m_open[idx].sl=event.sl;
       m_open[idx].openTime=(event.timeServer!=0?event.timeServer:TimeCurrent());
+      m_open[idx].lastEventTime=m_open[idx].openTime;
       m_open[idx].accountMode=m_currentMode;
       double r = CalcInitialRisk(event.symbol, event.price, event.sl, event.volume);
-      if(r<=0 && m_lastPlannedSymbol==event.symbol && (TimeCurrent()-m_lastPlannedTime) < 180)
+      if(r<=0 && m_lastPlannedSymbol==event.symbol && (TimeCurrent()-m_lastPlannedTime) < 300)
          r = m_lastPlannedRisk;
       m_open[idx].initialRiskMoney=r;
       m_lastPlannedRisk=0; m_lastPlannedSymbol="";
+   }
+
+   void HandlePartialClose(const MM_TradeEvent &event)
+   {
+      int idx = FindOpenByPos(event.positionId);
+      if(idx<0) idx = FindOpenByTicket(event.ticket);
+      if(idx<0) idx = FindOpenBySymbol(event.symbol);
+      if(idx<0 || !m_open[idx].active)
+      {
+         // cannot aggregate; record as standalone partial-close trade
+         MM_ClosedTrade t; t.Reset();
+         t.ticket=(event.ticket!=0?event.ticket:event.order); t.positionId=event.positionId; t.symbol=event.symbol;
+         t.openTime=event.timeServer; t.closeTime=event.timeServer; t.openPrice=event.price; t.closePrice=event.price;
+         t.volume=event.volume; t.profit=event.profit; t.commission=event.commission; t.swap=event.swap;
+         t.accountMode=m_currentMode; t.durationSec=0; t.rMultiple=0;
+         PushClosed(t);
+         g_mmLog.Warn("STATS_PARTIAL_ORPHAN","Partial close without tracked open pos="+(string)event.positionId+" sym="+event.symbol);
+         return;
+      }
+      m_open[idx].realizedProfit += event.profit;
+      m_open[idx].realizedCommission += event.commission;
+      m_open[idx].realizedSwap += event.swap;
+      m_open[idx].closedVolume += event.volume;
+      m_open[idx].lastEventTime = (event.timeServer!=0?event.timeServer:TimeCurrent());
+      // update remaining volume from live position if possible
+      double beforeRemain = m_open[idx].volumeRemain;
+      SyncOpenFromPosition(m_open[idx]);
+      if(m_open[idx].volumeRemain <= 0.0 || !PositionStillOpen(m_open[idx].positionId, m_open[idx].symbol))
+      {
+         double totalVol = m_open[idx].closedVolume; if(totalVol<=0) totalVol=m_open[idx].volumeInitial;
+         FinalizeTrade(idx,event,m_open[idx].realizedProfit,m_open[idx].realizedCommission,m_open[idx].realizedSwap,totalVol,m_open[idx].lastEventTime,event.price);
+      }
+      else
+      {
+         // proportionally reduce baseline risk to remaining exposure
+         if(beforeRemain>0 && m_open[idx].volumeRemain < beforeRemain && m_open[idx].volumeInitial>0)
+         {
+            double frac = m_open[idx].volumeRemain / beforeRemain;
+            if(frac<0) frac=0;
+            m_open[idx].initialRiskMoney = MathMax(0.0, m_open[idx].initialRiskMoney * frac);
+         }
+      }
    }
 
    void HandleClose(const MM_TradeEvent &event)
@@ -150,33 +265,25 @@ private:
       int idx = FindOpenByPos(event.positionId);
       if(idx<0) idx = FindOpenByTicket(event.ticket);
       if(idx<0) idx = FindOpenBySymbol(event.symbol);
-      MM_ClosedTrade t; t.Reset();
-      t.positionId=event.positionId; t.ticket=(event.ticket!=0?event.ticket:event.order);
-      t.symbol=event.symbol;
-      t.closeTime=(event.timeServer!=0?event.timeServer:TimeCurrent());
-      t.closePrice=event.price; t.profit=event.profit; t.commission=event.commission; t.swap=event.swap;
-      t.volume=event.volume;
-      double initRisk=0;
-      if(idx>=0 && m_open[idx].active)
+      if(idx<0 || !m_open[idx].active)
       {
-         t.openTime=m_open[idx].openTime;
-         t.openPrice=m_open[idx].openPrice;
-         t.accountMode=m_open[idx].accountMode;
-         t.typeStr = (m_open[idx].side==POSITION_TYPE_BUY)?"BUY":"SELL";
-         if(t.volume<=0) t.volume=m_open[idx].volume;
-         if(t.symbol=="") t.symbol=m_open[idx].symbol;
-         initRisk=m_open[idx].initialRiskMoney;
-         if(initRisk<=0) initRisk=CalcInitialRisk(t.symbol,t.openPrice,m_open[idx].sl,m_open[idx].volume);
-         m_open[idx].active=false;
+         MM_ClosedTrade t; t.Reset();
+         t.positionId=event.positionId; t.ticket=(event.ticket!=0?event.ticket:event.order);
+         t.symbol=event.symbol;
+         t.closeTime=(event.timeServer!=0?event.timeServer:TimeCurrent());
+         t.closePrice=event.price; t.profit=event.profit; t.commission=event.commission; t.swap=event.swap;
+         t.volume=event.volume; t.openTime=t.closeTime; t.openPrice=t.closePrice; t.typeStr=""; t.accountMode=m_currentMode;
+         t.durationSec=0; t.rMultiple=0;
+         PushClosed(t);
+         return;
       }
-      else
-      {
-         t.openTime=t.closeTime; t.openPrice=t.closePrice; t.typeStr=""; t.accountMode=m_currentMode;
-      }
-      t.durationSec = (t.openTime>0 && t.closeTime>=t.openTime)? (long)(t.closeTime-t.openTime) : 0;
-      double net = t.profit + t.commission + t.swap;
-      t.rMultiple = (initRisk>0)? (net/initRisk) : 0.0;
-      PushClosed(t);
+      double totalProfit = m_open[idx].realizedProfit + event.profit;
+      double totalComm   = m_open[idx].realizedCommission + event.commission;
+      double totalSwap   = m_open[idx].realizedSwap + event.swap;
+      double totalVol    = m_open[idx].closedVolume + event.volume;
+      if(totalVol<=0) totalVol=m_open[idx].volumeInitial;
+      datetime ct = (event.timeServer!=0?event.timeServer:TimeCurrent());
+      FinalizeTrade(idx,event,totalProfit,totalComm,totalSwap,totalVol,ct,event.price);
    }
 
    void ComputeKpi(MM_Kpi &k, ENUM_MM_ACCOUNT_MODE modeFilter, bool filterByMode)
@@ -231,7 +338,49 @@ public:
    virtual void OnTradeEvent(const MM_TradeEvent &event)
    {
       if(event.type==MM_EVENT_OPEN) HandleOpen(event);
+      else if(event.type==MM_EVENT_PARTIAL_FILL && event.reasonCode=="PARTIAL_CLOSE") HandlePartialClose(event);
+      else if(event.type==MM_EVENT_PARTIAL_FILL && event.reasonCode=="INOUT") HandlePartialClose(event);
       else if(event.type==MM_EVENT_CLOSE) HandleClose(event);
+   }
+
+   double CalcOpenRiskMoney(long magicFilter=0, const string symbolFilter="")
+   {
+      double total=0.0;
+      // prefer tracked open risk
+      bool any=false;
+      for(int i=0;i<m_openCount;i++)
+      {
+         if(!m_open[i].active) continue;
+         if(symbolFilter!="" && m_open[i].symbol!=symbolFilter) continue;
+         // sync to live where possible for accurate remaining
+         SyncOpenFromPosition(m_open[i]);
+         double r=RemainingRisk(m_open[i]);
+         if(r>0){ total+=r; any=true; }
+      }
+      // fallback/supplement: scan live positions (covers untracked/manual positions)
+      int totalPos=PositionsTotal();
+      for(int i=0;i<totalPos;i++)
+      {
+         ulong ticket=PositionGetTicket(i);
+         if(ticket==0 || !PositionSelectByTicket(ticket)) continue;
+         string sym=PositionGetString(POSITION_SYMBOL);
+         long mg=(long)PositionGetInteger(POSITION_MAGIC);
+         if(symbolFilter!="" && sym!=symbolFilter) continue;
+         if(magicFilter!=0 && mg!=magicFilter) continue;
+         long pid=(long)PositionGetInteger(POSITION_IDENTIFIER);
+         if(FindOpenByPos(pid)>=0) continue; // already counted via track
+         double vol=PositionGetDouble(POSITION_VOLUME);
+         double open=PositionGetDouble(POSITION_PRICE_OPEN);
+         double sl=PositionGetDouble(POSITION_SL);
+         double slDist=MathAbs(open-sl);
+         if(sl<=0 || slDist<=0 || vol<=0) continue;
+         double tickVal=SymbolInfoDouble(sym,SYMBOL_TRADE_TICK_VALUE);
+         double tickSize=SymbolInfoDouble(sym,SYMBOL_TRADE_TICK_SIZE);
+         if(tickVal<=0 || tickSize<=0) continue;
+         double perLot=(slDist/tickSize)*tickVal;
+         if(perLot>0) total += perLot*vol;
+      }
+      return total;
    }
 
    void GetKpi(MM_Kpi &out){ ComputeKpi(out, ACCOUNT_PERSONAL, false); }
@@ -242,7 +391,7 @@ public:
    {
       string path = (filename=="")? m_csvPath : filename;
       int h=FileOpen(path, FILE_WRITE|FILE_CSV|FILE_COMMON|FILE_ANSI, ',');
-      if(h==INVALID_HANDLE){ Print("Stats: failed to open CSV ",path); return false; }
+      if(h==INVALID_HANDLE){ Print("Stats: failed to open CSV ",path); g_mmLog.Error("CSV_OPEN_FAIL",path); return false; }
       FileWrite(h,"ticket","symbol","type","openTime","closeTime","volume","openPrice","closePrice","profit","commission","swap","R","duration","accountMode");
       for(int i=0;i<m_closedCount;i++)
       {
@@ -267,12 +416,12 @@ public:
          );
       }
       FileClose(h);
+      g_mmLog.Info("CSV_EXPORT",path+" rows="+(string)m_closedCount);
       Print("Stats: CSV exported ",path);
       return true;
    }
 
    void CloseCSV(){}
-   // legacy helpers
    double WinRate(){ MM_Kpi k; GetKpi(k); return k.winRate; }
    double ProfitFactor(){ MM_Kpi k; GetKpi(k); return k.profitFactor; }
    int TotalTrades(){ MM_Kpi k; GetKpi(k); return k.trades; }

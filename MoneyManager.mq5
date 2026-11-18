@@ -1,13 +1,14 @@
 ﻿//+------------------------------------------------------------------+
 //|                                                MoneyManager.mq5  |
-//|               Phase 6: UI/Guards/Stats/Profiles/Alerts wiring    |
+//|       Phase 7: hardening wiring (risk/DD/news/logger/guards)     |
 //+------------------------------------------------------------------+
 #property copyright "Money Manager"
-#property version   "1.60"
+#property version   "1.70"
 #property strict
 
 #include "Include/Utils/Common.mqh"
 #include "Include/Core/Contracts.mqh"
+#include "Include/Core/Logger.mqh"
 #include "Include/Core/RiskEngine.mqh"
 #include "Include/Core/StopsValidator.mqh"
 #include "Include/Core/ExecutionPolicy.mqh"
@@ -86,25 +87,67 @@ int g_lastDay=-1;
 bool g_lastConnected=true;
 bool g_lastNewsBlackout=false;
 
+double EffDailyLossLimit(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.dailyLossLimitPct; return InpDailyLossLimit; }
+double EffDailyProfitLimit(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.dailyProfitLimitPct; return InpDailyProfitLimit; }
+double EffWeeklyLossLimit(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.weeklyLossLimitPct; return InpWeeklyLossLimit; }
+double EffMonthlyLossLimit(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.monthlyLossLimitPct; return InpMonthlyLossLimit; }
+double EffMaxDrawdown(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.maxDrawdownPct; return InpMaxDrawdown; }
+int    EffMaxTradesPerDay(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return (pr.maxTradesPerDay>0?pr.maxTradesPerDay:InpMaxTradesPerDay); return InpMaxTradesPerDay; }
+int    EffMaxConsecLoss(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return (pr.maxConsecLoss>0?pr.maxConsecLoss:InpMaxConsecLoss); return InpMaxConsecLoss; }
+int    EffCooldownMinutes(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return (pr.cooldownMinutes>0?pr.cooldownMinutes:InpCooldownMinutes); return InpCooldownMinutes; }
+double EffMaxSpread(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr) && pr.maxSpreadPoints>0) return pr.maxSpreadPoints; return InpMaxSpreadPoints; }
+bool   EffNewsEnabled(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.newsEnabled; return InpNewsEnabled; }
+bool   EffNewsBlackout(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return (pr.newsBlackoutHigh || InpNewsBlackout); return InpNewsBlackout; }
+bool   EffNewsOfflineBlock(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return (pr.newsOfflineBlock || InpNewsOfflineBlock); return InpNewsOfflineBlock; }
+
 void RefreshRiskContext()
 {
-   ENUM_MM_RISK_BASIS basis = (InpAccountMode==ACCOUNT_PROP)?MM_BASIS_ALLOWED_DD:MM_BASIS_EQUITY;
-   double remDaily=0, remMax=0;
-   if(InpAccountMode==ACCOUNT_PROP)
+   ENUM_MM_ACCOUNT_MODE mode = InpAccountMode;
+   bool propMode = (InpPropFirmEnabled || mode==ACCOUNT_PROP);
+   ENUM_MM_RISK_BASIS basis = propMode ? MM_BASIS_ALLOWED_DD : MM_BASIS_EQUITY;
+   MM_ProfileRecord pr; bool hasProf = g_profiles.GetActive(pr);
+   if(hasProf)
    {
-      double bal=AccountInfoDouble(ACCOUNT_BALANCE);
-      SPropFirmRules r=g_prop.GetRules();
-      if(r.maxDailyLoss>0) remDaily = MathMax(0.0, bal*(r.maxDailyLoss/100.0) - g_prot.DailyLoss());
-      if(r.maxTotalDD>0)
-      {
-         double ref = (r.ddReference==DD_FROM_EQUITY)? AccountInfoDouble(ACCOUNT_EQUITY) : bal;
-         remMax = MathMax(0.0, ref*(r.maxTotalDD/100.0));
-      }
+      if(pr.profile.riskBasis=="AllowedDD") basis = MM_BASIS_ALLOWED_DD;
+      else if(pr.profile.riskBasis=="Balance") basis = MM_BASIS_BALANCE_DAY;
+      else if(pr.profile.riskBasis=="Equity") basis = MM_BASIS_EQUITY;
    }
-   g_risk.BuildContext(g_riskCtx, InpAccountMode, basis,
-                       AccountInfoDouble(ACCOUNT_BALANCE), remDaily, remMax,
-                       0, 0, false, InpMinRiskPercent, InpMaxRiskPercent, 0,
-                       InpMagic, "");
+
+   double bal=AccountInfoDouble(ACCOUNT_BALANCE);
+   double eq =AccountInfoDouble(ACCOUNT_EQUITY);
+   double dayStartBal = g_prot.DayStartBalance(); if(dayStartBal<=0) dayStartBal=g_store.DayStartBalance();
+   double dayStartEq  = g_prot.DayStartEquity();  if(dayStartEq<=0)  dayStartEq =g_store.DayStartEquity();
+   g_prot.SyncPeaks(); g_store.SyncPeaks();
+
+   double remDaily=0, remMax=0;
+   double dailyLossMoney = g_prot.DailyLoss();
+   double dLim = EffDailyLossLimit();
+   double mLim = EffMaxDrawdown();
+
+   if(propMode && g_prop.IsEnabled())
+   {
+      SPropFirmRules r=g_prop.GetRules();
+      remDaily = g_prop.RemainingDailyDDMoney(dailyLossMoney, dayStartBal, dayStartEq);
+      remMax   = g_prop.RemainingMaxDDMoney(eq, g_prot.PeakEquity(), g_prot.StartBalance());
+      if(r.maxDailyLoss<=0 && dLim>0) remDaily = g_prot.RemainingDailyDDMoney(dLim);
+      if(r.maxTotalDD<=0 && mLim>0) remMax = g_prot.RemainingMaxDDMoney(mLim, (r.ddReference==DD_FROM_EQUITY));
+   }
+   else
+   {
+      if(dLim>0) remDaily = g_prot.RemainingDailyDDMoney(dLim);
+      if(mLim>0) remMax = g_prot.RemainingMaxDDMoney(mLim, true);
+   }
+
+   double minRisk = InpMinRiskPercent;
+   double maxRisk = InpMaxRiskPercent;
+   if(hasProf){ if(pr.profile.minRiskPercent>0) minRisk=pr.profile.minRiskPercent; if(pr.profile.maxRiskPercent>0) maxRisk=pr.profile.maxRiskPercent; }
+
+   g_risk.BuildContext(g_riskCtx, mode, basis,
+                       dayStartBal, remDaily, remMax,
+                       0, 0, false, minRisk, maxRisk, 0,
+                       0, "");
+   // real aggregate open risk including partial-close aware tracking
+   g_riskCtx.openRiskMoney = g_stats.CalcOpenRiskMoney(InpMagic, "");
 }
 
 void RefreshGuardConfig()
@@ -112,65 +155,87 @@ void RefreshGuardConfig()
    g_guardCfg.Reset();
    g_guardCfg.accountMode = InpAccountMode;
    g_guardCfg.protectionEnabled = true;
-   g_guardCfg.dailyLossLimitPct = InpDailyLossLimit;
-   g_guardCfg.dailyProfitLimitPct = InpDailyProfitLimit;
-   g_guardCfg.weeklyLossLimitPct = InpWeeklyLossLimit;
-   g_guardCfg.monthlyLossLimitPct = InpMonthlyLossLimit;
-   g_guardCfg.maxDrawdownPct = InpMaxDrawdown;
-   g_guardCfg.maxTradesPerDay = InpMaxTradesPerDay;
-   g_guardCfg.maxConsecLoss = InpMaxConsecLoss;
-   g_guardCfg.cooldownMinutes = InpCooldownMinutes;
-   double bal=AccountInfoDouble(ACCOUNT_BALANCE); if(bal<=0) bal=1;
-   g_guardCfg.dailyLossPct = g_prot.DailyLoss()/bal*100.0;
-   g_guardCfg.dailyProfitPct = g_prot.DailyProfit()/bal*100.0;
+   g_guardCfg.dailyLossLimitPct = EffDailyLossLimit();
+   g_guardCfg.dailyProfitLimitPct = EffDailyProfitLimit();
+   g_guardCfg.weeklyLossLimitPct = EffWeeklyLossLimit();
+   g_guardCfg.monthlyLossLimitPct = EffMonthlyLossLimit();
+   g_guardCfg.maxDrawdownPct = EffMaxDrawdown();
+   g_guardCfg.maxTradesPerDay = EffMaxTradesPerDay();
+   g_guardCfg.maxConsecLoss = EffMaxConsecLoss();
+   g_guardCfg.cooldownMinutes = EffCooldownMinutes();
+
+   double dayStartBal = g_prot.DayStartBalance(); if(dayStartBal<=0) dayStartBal=AccountInfoDouble(ACCOUNT_BALANCE);
+   double dayStartEq  = g_prot.DayStartEquity();  if(dayStartEq<=0)  dayStartEq =AccountInfoDouble(ACCOUNT_EQUITY);
+   g_prot.SyncPeaks();
+   g_guardCfg.dailyLossPct = g_prot.DailyLossPct(dayStartBal);
+   g_guardCfg.dailyProfitPct = g_prot.DailyProfitPct(dayStartBal);
+   g_guardCfg.currentDrawdownPct = g_prot.CurrentDrawdownPct();
    g_guardCfg.tradesToday = g_prot.TradesToday();
    g_guardCfg.consecLosses = g_prot.ConsecutiveLosses();
    g_guardCfg.inCooldown = !g_prot.CheckCooldown();
-   g_guardCfg.propEnabled = InpPropFirmEnabled;
-   if(InpPropFirmEnabled)
+
+   g_guardCfg.propEnabled = (InpPropFirmEnabled || InpAccountMode==ACCOUNT_PROP);
+   if(g_guardCfg.propEnabled && g_prop.IsEnabled())
    {
       SPropFirmRules r=g_prop.GetRules();
       g_guardCfg.propDailyLossLimitPct = r.maxDailyLoss;
       g_guardCfg.propMaxTotalDDPct = r.maxTotalDD;
-      g_guardCfg.propDailyLossUsedPct = g_guardCfg.dailyLossPct;
+      g_guardCfg.propDailyLossUsedPct = g_prop.DailyLossUsedPct(g_prot.DailyLoss(), dayStartBal, dayStartEq);
+      g_guardCfg.propTotalDDUsedPct = g_prop.TotalDDUsedPct(AccountInfoDouble(ACCOUNT_EQUITY), g_prot.PeakEquity(), g_prot.StartBalance());
       g_guardCfg.propMaxPositionSizePct = r.maxPositionSize;
       g_guardCfg.propConsistencyEnabled = (r.consistencyPercent>0);
       g_guardCfg.propConsistencyPct = r.consistencyPercent;
+      double todayProfitPct = (dayStartBal>0)?(g_prot.DailyProfit()/dayStartBal*100.0):0.0;
+      g_guardCfg.propTodayProfitPct = todayProfitPct;
       g_guardCfg.propWeekendClose = r.weekendClose;
-      g_guardCfg.propMaxTradesPerDay = InpMaxTradesPerDay;
+      g_guardCfg.propMaxTradesPerDay = (r.mode==PROP_CHALLENGE && EffMaxTradesPerDay()>0)?EffMaxTradesPerDay():EffMaxTradesPerDay();
    }
-   g_guardCfg.newsEnabled = InpNewsEnabled;
-   bool inBlackout = (InpNewsEnabled && g_news.IsNewsBlackout(_Symbol,InpNewsMinutesBefore,InpNewsMinutesAfter));
+
+   bool newsEnabled = EffNewsEnabled();
+   bool inBlackout = (newsEnabled && g_news.IsNewsBlackout(_Symbol,InpNewsMinutesBefore,InpNewsMinutesAfter));
+   g_guardCfg.newsEnabled = newsEnabled;
+   g_guardCfg.newsBlackoutOnHigh = EffNewsBlackout();
+   g_guardCfg.newsOfflineBlock = EffNewsOfflineBlock();
+   g_guardCfg.newsDataAvailable = g_news.HasData();
+   g_guardCfg.newsIsStale = g_news.IsStale();
    g_guardCfg.newsInBlackout = inBlackout;
-   g_guardCfg.newsBlackoutOnHigh = InpNewsBlackout;
-   g_guardCfg.newsOfflineBlock = InpNewsOfflineBlock;
-   g_guardCfg.newsDataAvailable = (g_news.EventCount()>0);
-   g_guardCfg.newsIsStale = !g_guardCfg.newsDataAvailable;
    g_guardCfg.newsUpcomingWarn = false;
+
    g_guardCfg.sessionFilterEnabled = InpSessionFilter;
-   g_guardCfg.sessionAllowed = true;
-   g_guardCfg.spreadCheckEnabled = (InpMaxSpreadPoints>0 || InpSpreadWarnPoints>0);
-   g_guardCfg.maxSpreadPoints = InpMaxSpreadPoints;
+   g_guardCfg.sessionAllowed = !InpSessionFilter || (g_session.Current()!=SESSION_OFF);
+   g_guardCfg.spreadCheckEnabled = (EffMaxSpread()>0 || InpSpreadWarnPoints>0);
+   g_guardCfg.maxSpreadPoints = EffMaxSpread();
    g_guardCfg.spreadWarnPoints = InpSpreadWarnPoints;
+
    MM_TradePlan p; p.Reset(); p.symbol=_Symbol;
    g_guards.FillLiveConfig(p, g_guardCfg);
+   g_guards.ApplyNewsState(g_guardCfg, g_news.HasData(), g_news.IsStale(), inBlackout);
 
    if(inBlackout && !g_lastNewsBlackout)
+   {
       g_alerts.AlertNews(_Symbol, "News blackout window active");
+      g_mmLog.Warn("NEWS_BLACKOUT", _Symbol+" blackout active src="+g_news.SourceTag());
+   }
    g_lastNewsBlackout = inBlackout;
+
+   // sync key state
+   g_store.SyncPeaks();
 }
 
 void CheckConnectionAlert()
 {
    bool conn = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
-   if(!conn && g_lastConnected) g_alerts.AlertConnectionLost();
-   if(conn && !g_lastConnected) g_alerts.AlertConnectionRestored();
+   if(!conn && g_lastConnected){ g_alerts.AlertConnectionLost(); g_mmLog.Warn("CONNECTION","lost"); }
+   if(conn && !g_lastConnected){ g_alerts.AlertConnectionRestored(); g_mmLog.Info("CONNECTION","restored"); }
    g_lastConnected = conn;
 }
 
 int OnInit()
 {
-   if(!g_store.Init()) Print("WARN: StateStore init failed");
+   g_mmLog.Init("mm_"+(string)AccountInfoInteger(ACCOUNT_LOGIN));
+   g_mmLog.Info("INIT","MoneyManager Phase7 init start "+_Symbol);
+   if(!g_store.Init()) { Print("WARN: StateStore init failed"); g_mmLog.Warn("STATE_INIT_FAIL","StateStore init failed"); }
+
    g_alerts.Init();
    g_ui.status.SetAlerts(GetPointer(g_alerts));
    g_guards.Init(GetPointer(g_ui.status), true);
@@ -180,13 +245,20 @@ int OnInit()
    g_profiles.SetActiveByMode(InpAccountMode);
    g_positions.Init(); g_positions.SetMagic(InpMagic);
    g_prot.Init();
+   g_prot.SyncPeaks();
+   g_store.SyncPeaks();
    g_news.Init();
    g_session.Init();
    g_stats.Init("MoneyManager_trades.csv");
    g_stats.SetAccountMode(InpAccountMode);
    g_lifecycle.AddListener(GetPointer(g_stats));
 
-   if(InpPropFirmEnabled){SPropFirmRules r;g_prop.Init();g_prop.LoadPreset(InpPropPreset,r);r.mode=InpPropMode;g_prop.Enable(r);}else g_prop.Init();
+   if(InpPropFirmEnabled)
+   {
+      SPropFirmRules r; g_prop.Init(); g_prop.LoadPreset(InpPropPreset,r); r.mode=InpPropMode; g_prop.Enable(r);
+      g_prop.SyncBaseline(g_prot.StartBalance(), g_prot.PeakEquity());
+   }
+   else g_prop.Init();
 
    g_policy.Reset(); g_policy.maxSlippagePoints=InpSlippage;
 
@@ -203,10 +275,12 @@ int OnInit()
    g_ui.SetAccountMode(InpAccountMode);
    g_ui.Create();
 
+   MqlDateTime dt; TimeToStruct(TimeCurrent(),dt); g_lastDay=dt.day;
    g_lastConnected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
    g_lastNewsBlackout=false;
    EventSetTimer(1);
-   Print("Money Manager EA Phase6 initialized.");
+   g_mmLog.Info("INIT_OK","Money Manager Phase7 initialized magic="+(string)InpMagic);
+   Print("Money Manager EA Phase7 initialized.");
    return(INIT_SUCCEEDED);
 }
 
@@ -217,24 +291,35 @@ void OnDeinit(const int reason)
    g_posDrag.Clear();
    g_ui.Destroy();
    g_profiles.SaveAll();
+   g_store.SyncPeaks();
    g_store.Save();
    g_stats.CloseCSV();
+   g_mmLog.Info("DEINIT","reason="+(string)reason);
 }
 
 void OnTick()
 {
    g_session.Update();
    MqlDateTime dt; TimeToStruct(TimeCurrent(),dt);
-   if(dt.day!=g_lastDay){ g_prot.NewDay(); g_lastDay=dt.day; }
+   if(dt.day!=g_lastDay)
+   {
+      g_prot.NewDay();
+      g_store.SyncPeaks();
+      g_store.Save();
+      g_lastDay=dt.day;
+      g_mmLog.Info("DAY_RESET","New trading day");
+   }
    CheckConnectionAlert();
+   g_prot.SyncPeaks();
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i); if(ticket==0) continue;
+      if(!PositionSelectByTicket(ticket)) continue;
       if((int)PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
       if(InpBEMode!=BE_NONE)
       {
          string sym=PositionGetString(POSITION_SYMBOL);
-         double point=SymbolInfoDouble(sym,SYMBOL_POINT);
+         double point=SymbolInfoDouble(sym,SYMBOL_POINT); if(point<=0) continue;
          double slPts=PriceToPoints(sym,MathAbs(PositionGetDouble(POSITION_PRICE_OPEN)-PositionGetDouble(POSITION_SL)));
          if(slPts>0 && MathAbs(PositionGetDouble(POSITION_PRICE_CURRENT)-PositionGetDouble(POSITION_PRICE_OPEN))/point >= slPts)
             g_positions.MoveToBreakEven(ticket,InpBEMode,InpBEPoints);
@@ -279,5 +364,22 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
                         const MqlTradeResult& result)
 {
    g_lifecycle.OnTradeTransaction(trans,request,result);
+   // keep protection/trade counters in sync with closed deals
+   if(trans.type==TRADE_TRANSACTION_DEAL_ADD && HistoryDealSelect(trans.deal))
+   {
+      ENUM_DEAL_ENTRY entry=(ENUM_DEAL_ENTRY)HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+      ENUM_DEAL_TYPE  dt=(ENUM_DEAL_TYPE)HistoryDealGetInteger(trans.deal, DEAL_TYPE);
+      if((entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_INOUT) && (dt==DEAL_TYPE_BUY || dt==DEAL_TYPE_SELL))
+      {
+         double profit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT)+HistoryDealGetDouble(trans.deal, DEAL_COMMISSION)+HistoryDealGetDouble(trans.deal, DEAL_SWAP);
+         g_prot.RecordTrade(profit);
+         if(InpPropFirmEnabled && g_prop.IsEnabled()) g_prop.RecordTradingDay(g_prot.DailyProfit());
+         g_mmLog.Info("DEAL_CLOSE","profit="+DoubleToString(profit,2)+" dailyLoss="+DoubleToString(g_prot.DailyLoss(),2));
+      }
+      if(entry==DEAL_ENTRY_IN && (dt==DEAL_TYPE_BUY || dt==DEAL_TYPE_SELL))
+      {
+         g_store.SyncPeaks();
+      }
+   }
 }
 //+------------------------------------------------------------------+

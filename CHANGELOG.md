@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here (phase-based).
 
+## [v0.7.0-phase7] - In progress (Phase 7: Hardening)
+
+### Added
+- `Include/Core/Logger.mqh`: file logger (`g_mmLog`) with rotation/cleanup for EA/guard/execution/trade/news/state events.
+- `Tests/IntegrationTest.mq5`: integration smoke script covering logger/news staleness, DD/remaining helpers, prop DD helpers, retcode classification, stops validation, stats aggregation/open-risk, and key guard decisions.
+- `Docs/phase7-implementation.md`: Phase 7 implementation/wiring notes and pending verification.
+
+### Changed
+- `MoneyManager.mq5` (v1.70): Phase 7 wiring for logger init, real open-risk into risk context, profile/protection/prop-firm/state DD & day-start context, news staleness/source/blackout guard inputs, trade-close recording hooks, and day/state sync.
+- `Include/PropFirm/PropFirm.mqh`, `Include/Protection/Protection.mqh`, `Include/State/StateStore.mqh`: day-start/peak tracking and remaining/used DD helpers with persistence/logging support.
+- `Include/News/NewsManager.mqh`, `Include/UI/NewsBanner.mqh`: news source/staleness API and banner display.
+- `Include/Statistics/Statistics.mqh`, `Include/Trade/TradeLifecycle.mqh`: partial-close/in-out aggregation, live open-risk calc, hedging/netting-aware event normalization and logging.
+- `Include/Core/ExecutionPolicy.mqh`, `Include/Core/ExecutionRouter.mqh`, `Include/Core/StopsValidator.mqh`: unknown retcode/partial-fill handling, route logging, and symbol/property/margin edge-case validation.
+- `Include/Guards/GuardEngine.mqh`: news-state application helper for guard config.
+- `Include/UI/PanelShell.mqh`, `Include/UI/DragTool.mqh`, `Include/UI/UiStrings.mqh`, `Include/UI/PreviewOverlay.mqh`: expanded bilingual labels/tooltips and UI polish.
+
+### Notes
+- MetaEditor compile/test not executed by agent; user verification pending (target 0 errors/0 warnings) with demo/script evidence.
+
 ## [v0.6.0-phase6] - In progress (Phase 6: Stats, Profiles, Alerts, CSV)
 
 ### Added
@@ -83,3 +102,4 @@ All notable changes to this project are documented here (phase-based).
 
 ## [0.0.1] - Prior state
 - Initial prototype modules and `MoneyManager.mq5`/`MoneyManager.ex5` present before Phase 1 restructure.
+
