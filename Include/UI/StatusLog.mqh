@@ -1,11 +1,12 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                                   StatusLog.mqh  |
-//|                        Status/reject log for UI (Phase 4)        |
+//|             Status/reject log + alert forwarding (Phase 4/6)     |
 //+------------------------------------------------------------------+
 #ifndef MM_STATUS_LOG_MQH
 #define MM_STATUS_LOG_MQH
 
 #include "../Core/RejectSink.mqh"
+#include "../Alerts/Alerts.mqh"
 
 #define MM_STATUS_MAX 20
 
@@ -23,6 +24,7 @@ private:
    MM_StatusEntry m_items[MM_STATUS_MAX];
    int            m_count;
    int            m_head;
+   CAlertManager *m_alerts;
    void Push(const string level,const string code,const string msg)
    {
       int idx = (m_count < MM_STATUS_MAX) ? m_count++ : m_head;
@@ -31,7 +33,9 @@ private:
       if(m_count>=MM_STATUS_MAX) m_head=(m_head+1)%MM_STATUS_MAX;
    }
 public:
-   CStatusLog(){ m_count=0; m_head=0; }
+   CStatusLog(){ m_count=0; m_head=0; m_alerts=NULL; }
+   void SetAlerts(CAlertManager *alerts){ m_alerts=alerts; }
+
    virtual void OnExecutionReject(const string symbol,const string reasonCode,const string messageEN,uint retcode,const string context)
    {
       string msg=reasonCode+": "+messageEN+" ["+(string)retcode+"] "+symbol;
@@ -44,6 +48,7 @@ public:
       string msg=gr.guardId+"/"+gr.reasonCode+": "+gr.messageEN+" "+symbol;
       Push(lvl, gr.reasonCode, msg);
       Print("MM Guard(",lvl,"): ",msg);
+      if(m_alerts!=NULL) m_alerts.OnGuardEvent(gr,symbol);
    }
    void Info(const string code,const string msg){ Push("INFO",code,msg); Print("MM: ",msg); }
    void Warn(const string code,const string msg){ Push("WARN",code,msg); Print("MM WARN: ",msg); }

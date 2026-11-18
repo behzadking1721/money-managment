@@ -1,6 +1,6 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                                   PanelShell.mqh |
-//|              Mini/Drawer panel shell + UI wiring (Phase 4)       |
+//|          Mini/Drawer panel shell + UI wiring (Phase 4/5/6)       |
 //+------------------------------------------------------------------+
 #ifndef MM_PANEL_SHELL_MQH
 #define MM_PANEL_SHELL_MQH
@@ -17,6 +17,8 @@
 #include "../Core/ExecutionPolicy.mqh"
 #include "../Guards/IGuard.mqh"
 #include "../Guards/GuardEngine.mqh"
+#include "../Statistics/Statistics.mqh"
+#include "../Profiles/Profiles.mqh"
 #include "../Session/SessionManager.mqh"
 #include "../News/NewsManager.mqh"
 
@@ -29,7 +31,11 @@ private:
    bool m_hidden;
    bool m_langFA;
    bool m_dragMode;
+   int  m_tab; // 0=main, 1=stats
    int  m_x,m_y,m_wMini,m_hMini,m_wDrawer,m_hDrawer;
+   CStatistics     *m_stats;
+   CProfileManager *m_profiles;
+   ENUM_MM_ACCOUNT_MODE m_accMode;
 
    string N(const string s){ return m_pfx+s; }
    void Rect(const string name,int x,int y,int w,int h,color bg,color border)
@@ -73,7 +79,7 @@ public:
    CPreviewOverlay preview;
    CStatusLog     status;
 
-   CPanelShell(){ m_chart=0; m_sym=_Symbol; m_pfx="MM_UI_"; m_mini=true; m_hidden=false; m_langFA=false; m_dragMode=false; m_x=10; m_y=50; m_wMini=300; m_hMini=92; m_wDrawer=340; m_hDrawer=240; }
+   CPanelShell(){ m_chart=0; m_sym=_Symbol; m_pfx="MM_UI_"; m_mini=true; m_hidden=false; m_langFA=false; m_dragMode=false; m_tab=0; m_x=10; m_y=50; m_wMini=300; m_hMini=92; m_wDrawer=340; m_hDrawer=250; m_stats=NULL; m_profiles=NULL; m_accMode=ACCOUNT_PERSONAL; }
 
    void Init(long chart,const string symbol,int x=10,int y=50)
    {
@@ -88,6 +94,9 @@ public:
    bool LangFA(){ return m_langFA; }
    bool DragMode(){ return m_dragMode; }
    CUiStrings* Strings(){ return GetPointer(m_ui); }
+   void SetStats(CStatistics &s){ m_stats=GetPointer(s); }
+   void SetProfiles(CProfileManager &p){ m_profiles=GetPointer(p); }
+   void SetAccountMode(ENUM_MM_ACCOUNT_MODE m){ m_accMode=m; }
 
    void Create()
    {
@@ -98,8 +107,7 @@ public:
       Btn(N("Mini"), m_x+w-90, m_y+6, 38, 18, m_mini?m_ui.S_Drawer():m_ui.S_Mini(), clrSlateGray);
       Lbl(N("Info1"), m_x+8, m_y+28, "", clrSilver, 9);
       Lbl(N("Info2"), m_x+8, m_y+44, "", clrSilver, 9);
-      // action buttons row
-      int by = m_y + (m_mini?64:64);
+      int by = m_y + 64;
       Btn(N("Buy"),  m_x+8,   by, 44, 20, m_ui.S_Buy(), clrSeaGreen);
       Btn(N("Sell"), m_x+56,  by, 44, 20, m_ui.S_Sell(), clrIndianRed);
       Btn(N("Drag"), m_x+104, by, 50, 20, m_ui.S_DragMode(), m_dragMode?clrDarkOrange:clrSlateGray);
@@ -107,19 +115,29 @@ public:
       Btn(N("Clr"),  m_x+218, by, 40, 20, m_ui.T("Clr","Clr"), clrDimGray);
       if(!m_mini)
       {
+         Btn(N("TabM"), m_x+262, m_y+28, 36, 16, m_ui.S_Main(), (m_tab==0)?clrDarkSlateBlue:clrSlateGray);
+         Btn(N("TabS"), m_x+262, m_y+46, 36, 16, m_ui.S_Stats(), (m_tab==1)?clrDarkSlateBlue:clrSlateGray);
+
          Lbl(N("Info3"), m_x+8, m_y+88, "", clrSilver, 9);
          Lbl(N("Info4"), m_x+8, m_y+104, "", clrKhaki, 9);
-         Lbl(N("Help"),  m_x+8, m_y+126, m_ui.S_Help(), clrGray, 8);
-         Btn(N("RiskDn"), m_x+8,  m_y+150, 36, 20, "-R", clrSlateGray);
-         Btn(N("RiskUp"), m_x+48, m_y+150, 36, 20, "+R", clrSlateGray);
-         Btn(N("RRLock"), m_x+88, m_y+150, 50, 20, "RR", clrSlateGray);
-      Btn(N("TplS"),   m_x+142,m_y+150, 44, 20, m_ui.T("Save","Save"), clrSlateGray);
-      Btn(N("PosSel"), m_x+190,m_y+150, 48, 20, "Pos", clrDarkCyan);
-      Btn(N("BE"),     m_x+242,m_y+150, 28, 20, "BE", clrTeal);
-      Btn(N("Trail"),  m_x+274,m_y+150, 34, 20, "Trl", clrTeal);
-      Btn(N("PClose"), m_x+8,  m_y+194, 48, 20, "50%", clrMaroon);
-      Btn(N("PCAll"),  m_x+60, m_y+194, 56, 20, "All", clrMaroon);
-      Lbl(N("Log"), m_x+120, m_y+198, "", clrLightGray, 8);
+         Lbl(N("Help"),  m_x+8, m_y+120, m_ui.S_Help(), clrGray, 8);
+
+         Btn(N("RiskDn"), m_x+8,  m_y+142, 36, 18, "-R", clrSlateGray);
+         Btn(N("RiskUp"), m_x+48, m_y+142, 36, 18, "+R", clrSlateGray);
+         Btn(N("RRLock"), m_x+88, m_y+142, 50, 18, "RR", clrSlateGray);
+         Btn(N("TplS"),   m_x+142,m_y+142, 44, 18, m_ui.T("Save","Save"), clrSlateGray);
+         Btn(N("PosSel"), m_x+190,m_y+142, 48, 18, "Pos", clrDarkCyan);
+         Btn(N("BE"),     m_x+242,m_y+142, 28, 18, "BE", clrTeal);
+         Btn(N("Trail"),  m_x+274,m_y+142, 34, 18, "Trl", clrTeal);
+         Btn(N("PClose"), m_x+8,  m_y+164, 48, 18, "50%", clrMaroon);
+         Btn(N("PCAll"),  m_x+60, m_y+164, 56, 18, "All", clrMaroon);
+
+         Btn(N("CSV"),   m_x+8,   m_y+142, 44, 18, m_ui.S_CSV(), clrDarkOliveGreen);
+         Btn(N("ProfN"), m_x+56,  m_y+142, 52, 18, m_ui.S_Next(), clrDarkSlateBlue);
+         Btn(N("PrEx"),  m_x+112, m_y+142, 52, 18, m_ui.S_Export(), clrDarkSlateBlue);
+         Btn(N("PrIm"),  m_x+168, m_y+142, 52, 18, m_ui.S_Import(), clrDarkSlateBlue);
+
+         Lbl(N("Log"), m_x+8, m_y+188, "", clrLightGray, 8);
       }
       ApplyVisibility();
       ChartRedraw(m_chart);
@@ -131,13 +149,27 @@ public:
       string base[11]={N("BG"),N("Title"),N("Lang"),N("Mini"),N("Info1"),N("Info2"),N("Buy"),N("Sell"),N("Drag"),N("Send"),N("Clr")};
       for(int i=0;i<11;i++) ShowObj(base[i],show);
       bool dr = show && !m_mini;
-      string ext[13]={N("Info3"),N("Info4"),N("Help"),N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll"),N("Log")};
-      for(int i=0;i<13;i++) ShowObj(ext[i],dr);
+      string tabsAndInfo[6]={N("TabM"),N("TabS"),N("Info3"),N("Info4"),N("Help"),N("Log")};
+      for(int i=0;i<6;i++) ShowObj(tabsAndInfo[i],dr);
+      bool mainTab = dr && (m_tab==0);
+      bool statsTab = dr && (m_tab==1);
+      string mainBtns[9]={N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll")};
+      for(int i=0;i<9;i++) ShowObj(mainBtns[i],mainTab);
+      string statsBtns[4]={N("CSV"),N("ProfN"),N("PrEx"),N("PrIm")};
+      for(int i=0;i<4;i++) ShowObj(statsBtns[i],statsTab);
    }
 
    void ToggleHide(){ m_hidden=!m_hidden; ApplyVisibility(); preview.SetVisible(!m_hidden); ChartRedraw(m_chart); }
    void ToggleMini(){ m_mini=!m_mini; Create(); }
    void SetDragMode(bool on){ m_dragMode=on; }
+   void SetTab(int t){ m_tab=(t==1)?1:0; Create(); }
+
+   string ModeLabel()
+   {
+      if(m_accMode==ACCOUNT_PROP) return "PROP";
+      if(m_accMode==ACCOUNT_CRYPTO) return "CRYPTO";
+      return "PERSONAL";
+   }
 
    void Update(CSessionManager &sess, CNewsManager &news, CDragTool &drag,
                CRiskEngine &riskEng, CStopsValidator &stops, CGuardEngine &guards,
@@ -157,34 +189,56 @@ public:
       string modeStr = drag.Active()? (drag.IsBuy()?m_ui.S_Buy():m_ui.S_Sell()) : m_ui.T("Idle","Idle");
       string smode = (drag.SizingMode()==SIZING_AUTO_RISK)? (m_ui.S_Risk()+"%") : m_ui.S_Lot();
       Lbl(N("Info2"), m_x+8, m_y+44, m_ui.T("Mode","Mode")+": "+modeStr+"  "+smode+": "+DoubleToString(drag.RiskValue(),2), clrSilver, 9);
+
       if(!m_mini)
       {
-         string rs = drag.Active()? (m_ui.S_Entry()+"="+DoubleToString(drag.Entry(),(int)SymbolInfoInteger(m_sym,SYMBOL_DIGITS))+" SL="+DoubleToString(drag.SL(),(int)SymbolInfoInteger(m_sym,SYMBOL_DIGITS))) : "";
-         Lbl(N("Info3"), m_x+8, m_y+88, rs, clrSilver, 9);
-         MM_RiskResult rr = preview.LastRisk();
-         string rs2 = drag.Active()? (m_ui.S_Lot()+"="+DoubleToString(rr.lot,2)+" "+m_ui.S_Risk()+"="+DoubleToString(rr.riskPercent,2)+"% "+m_ui.S_RR()+"="+DoubleToString(rr.rr,2)) : "";
-         color c = (!rr.valid || rr.blocked || preview.LastGuards().hasBlock)?clrTomato:(preview.LastGuards().hasWarn?clrKhaki:clrLightGreen);
-         Lbl(N("Info4"), m_x+8, m_y+104, rs2, c, 9);
-         Lbl(N("Log"), m_x+8, m_y+174, status.LastLine(), clrLightGray, 8);
+         if(m_tab==1)
+         {
+            MM_Kpi k; k.Reset();
+            bool has=false;
+            if(m_stats!=NULL){ m_stats.GetKpiForMode(m_accMode, k); if(k.trades==0) m_stats.GetKpi(k); has=true; }
+            string l3 = m_ui.S_Trades()+":"+(has?IntegerToString(k.trades):"0")+" "+m_ui.S_WinRate()+":"+DoubleToString(k.winRate,1)+"% "+m_ui.S_PF()+":"+DoubleToString(k.profitFactor,2);
+            string l4 = m_ui.S_Exp()+":"+DoubleToString(k.expectancy,2)+" "+m_ui.S_AvgR()+":"+DoubleToString(k.avgR,2)+" "+m_ui.S_MaxDD()+":"+DoubleToString(k.maxDrawdown,2);
+            string prof = "-";
+            if(m_profiles!=NULL){ MM_ProfileRecord pr; if(m_profiles.GetActive(pr)) prof=pr.profile.name; }
+            string l5 = m_ui.S_Net()+":"+DoubleToString(k.netProfit,2)+" "+m_ui.S_Dur()+":"+DoubleToString(k.avgDurationMin,1)+"m ["+ModeLabel()+"/"+prof+"]";
+            Lbl(N("Info3"), m_x+8, m_y+88, l3, clrSilver, 9);
+            Lbl(N("Info4"), m_x+8, m_y+104, l4, clrKhaki, 9);
+            Lbl(N("Help"),  m_x+8, m_y+120, l5, clrLightGray, 8);
+            Lbl(N("Log"),   m_x+8, m_y+188, status.LastLine(), clrLightGray, 8);
+         }
+         else
+         {
+            string rs = drag.Active()? (m_ui.S_Entry()+"="+DoubleToString(drag.Entry(),(int)SymbolInfoInteger(m_sym,SYMBOL_DIGITS))+" SL="+DoubleToString(drag.SL(),(int)SymbolInfoInteger(m_sym,SYMBOL_DIGITS))) : "";
+            Lbl(N("Info3"), m_x+8, m_y+88, rs, clrSilver, 9);
+            MM_RiskResult rr = preview.LastRisk();
+            string rs2 = drag.Active()? (m_ui.S_Lot()+"="+DoubleToString(rr.lot,2)+" "+m_ui.S_Risk()+"="+DoubleToString(rr.riskPercent,2)+"% "+m_ui.S_RR()+"="+DoubleToString(rr.rr,2)) : "";
+            color c = (!rr.valid || rr.blocked || preview.LastGuards().hasBlock)?clrTomato:(preview.LastGuards().hasWarn?clrKhaki:clrLightGreen);
+            Lbl(N("Info4"), m_x+8, m_y+104, rs2, c, 9);
+            Lbl(N("Help"),  m_x+8, m_y+120, m_ui.S_Help(), clrGray, 8);
+            Lbl(N("Log"),   m_x+8, m_y+188, status.LastLine(), clrLightGray, 8);
+         }
+         Btn(N("TabM"), m_x+262, m_y+28, 36, 16, m_ui.S_Main(), (m_tab==0)?clrDarkSlateBlue:clrSlateGray);
+         Btn(N("TabS"), m_x+262, m_y+46, 36, 16, m_ui.S_Stats(), (m_tab==1)?clrDarkSlateBlue:clrSlateGray);
       }
-      Btn(N("Drag"), m_x+104, m_y + (m_mini?64:64), 50, 20, m_ui.S_DragMode(), m_dragMode?clrDarkOrange:clrSlateGray);
+      Btn(N("Drag"), m_x+104, m_y + 64, 50, 20, m_ui.S_DragMode(), m_dragMode?clrDarkOrange:clrSlateGray);
       ChartRedraw(m_chart);
    }
 
-   // Handle UI button clicks & hotkeys. Returns true if event consumed.
    bool OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam,
                      CDragTool &drag, CExecutionRouter &router, MM_RiskContext &ctx, MM_GuardConfig &gcfg, MM_ExecPolicy &policy,
                      CPositionDragTool &posDrag)
    {
-      // delegate drag object events first
       drag.OnChartEvent(id,lparam,dparam,sparam);
       posDrag.OnChartEvent(id,lparam,dparam,sparam);
 
       if(id==CHARTEVENT_OBJECT_CLICK)
       {
+         if(sparam==N("TabM")){ SetTab(0); return true; }
+         if(sparam==N("TabS")){ SetTab(1); return true; }
          if(sparam==N("Buy")){ m_dragMode=true; drag.Activate(true); status.Info("UI","Buy drag"); return true; }
          if(sparam==N("Sell")){ m_dragMode=true; drag.Activate(false); status.Info("UI","Sell drag"); return true; }
-         if(sparam==N("Drag")){ m_dragMode=!m_dragMode; if(!m_dragMode){} status.Info("UI",m_dragMode?"Drag on":"Drag off"); return true; }
+         if(sparam==N("Drag")){ m_dragMode=!m_dragMode; status.Info("UI",m_dragMode?"Drag on":"Drag off"); return true; }
          if(sparam==N("Clr")){ drag.Clear(); status.Info("UI","Cleared"); return true; }
          if(sparam==N("Mini")){ ToggleMini(); return true; }
          if(sparam==N("Lang")){ SetLang(!m_langFA); Create(); return true; }
@@ -197,17 +251,8 @@ public:
             return true;
          }
          if(sparam==N("BE")){
-            if(posDrag.Active()){
-               bool ok=posDrag.MoveToBE(0);
-               status.Info("BE", ok?"BE applied":"BE not applied");
-               if(!ok && posDrag.MultiOptIn()){
-                  int r=MessageBox("Apply BE to all positions (symbol)?","MoneyManager",MB_YESNO|MB_ICONQUESTION);
-                  if(r==IDYES){ /* multi apply requires opt-in+confirm; simple per-pos loop */
-                     int c=0; for(int i=PositionsTotal()-1;i>=0;i--){ ulong t=PositionGetTicket(i); if(t==0) continue; if(PositionGetString(POSITION_SYMBOL)!=m_sym) continue; if(posDrag.SelectTicket(t) && posDrag.MoveToBE(0)) c++; }
-                     status.Info("BE","Multi BE: "+(string)c);
-                  }
-               }
-            } else status.Warn("BE","No selected position");
+            if(posDrag.Active()){ bool ok=posDrag.MoveToBE(0); status.Info("BE", ok?"BE applied":"BE not applied"); }
+            else status.Warn("BE","No selected position");
             return true;
          }
          if(sparam==N("Trail")){
@@ -230,6 +275,23 @@ public:
             }
             return true;
          }
+         if(sparam==N("CSV")){
+            if(m_stats!=NULL){ bool ok=m_stats.ExportCSV("MoneyManager_trades.csv", m_accMode, false); status.Info("CSV", ok?"CSV exported":"CSV export failed"); }
+            else status.Warn("CSV","Stats not available");
+            return true;
+         }
+         if(sparam==N("ProfN")){
+            if(m_profiles!=NULL){ m_profiles.NextProfile(); MM_ProfileRecord pr; m_profiles.GetActive(pr); status.Info("PROFILE","Active: "+pr.profile.name); }
+            return true;
+         }
+         if(sparam==N("PrEx")){
+            if(m_profiles!=NULL){ bool ok=m_profiles.ExportProfile("", ""); status.Info("PROFILE", ok?"Profile exported":"Profile export failed"); }
+            return true;
+         }
+         if(sparam==N("PrIm")){
+            if(m_profiles!=NULL){ bool ok=m_profiles.ImportProfile("MoneyManager\\profile_import.json"); status.Info("PROFILE", ok?"Profile imported":"Import failed (MoneyManager\\profile_import.json)"); }
+            return true;
+         }
       }
 
       if(id==CHARTEVENT_KEYDOWN)
@@ -242,6 +304,7 @@ public:
          if(k==66){ m_dragMode=true; drag.Activate(true); return true; } // B
          if(k==83){ m_dragMode=true; drag.Activate(false); return true; } // S
          if(k==80){ if(!posDrag.SelectCurrent(m_sym,0)) posDrag.SelectCurrent("",0); status.Info("POS", posDrag.Active()?"Selected":"No position"); return true; } // P
+         if(k==75){ SetTab(m_tab==0?1:0); return true; } // K toggle stats
       }
       return false;
    }
@@ -255,13 +318,13 @@ public:
          if(r!=IDYES){ status.Info("SEND",m_ui.S_Cancelled()); return false; }
       }
       MM_ExecResult chk; MM_TradePlan plan; drag.BuildPlan(plan);
-      // preflight preview (includes guards) to know if blocked
       if(!router.Preflight(plan, ctx, policy, chk, gcfg))
       {
          status.Warn("BLOCK", chk.reasonCode+": "+chk.messageEN);
          MessageBox(chk.reasonCode+"\n"+chk.messageEN, "MoneyManager - "+m_ui.S_Blocked(), MB_OK|MB_ICONSTOP);
          return false;
       }
+      if(m_stats!=NULL) m_stats.RegisterPlannedRisk(plan.symbol, chk.risk.riskMoney, m_accMode);
       string summary = (drag.IsBuy()?"BUY ":"SELL ")+DoubleToString(chk.risk.lot,2)+" "+plan.symbol+
                        "\nSL="+DoubleToString(plan.slPrice,(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS))+
                        " TP="+(plan.tpCount>0?DoubleToString(plan.tpPrice[0],(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS)):"-")+
@@ -270,6 +333,7 @@ public:
       int res = MessageBox(summary, "MoneyManager", MB_YESNO|MB_ICONQUESTION);
       if(res!=IDYES){ status.Info("SEND",m_ui.S_Cancelled()); return false; }
       MM_ExecResult out; drag.BuildPlan(plan);
+      if(m_stats!=NULL) m_stats.RegisterPlannedRisk(plan.symbol, chk.risk.riskMoney, m_accMode);
       bool ok = router.Send(plan, ctx, policy, out, gcfg);
       if(ok){ status.Info("SEND",m_ui.S_Sent()+" "+out.reasonCode); drag.Deactivate(); m_dragMode=false; }
       else { status.Warn("SEND",out.reasonCode+": "+out.messageEN); MessageBox(out.reasonCode+"\n"+out.messageEN, "MoneyManager", MB_OK|MB_ICONERROR); }
@@ -279,8 +343,8 @@ public:
    void Destroy()
    {
       banner.Destroy(); badge.Destroy(); preview.Destroy();
-      string objs[24]={N("BG"),N("Title"),N("Lang"),N("Mini"),N("Info1"),N("Info2"),N("Buy"),N("Sell"),N("Drag"),N("Send"),N("Clr"),N("Info3"),N("Info4"),N("Help"),N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll"),N("Log")};
-      for(int i=0;i<24;i++) if(ObjectFind(m_chart,objs[i])>=0) ObjectDelete(m_chart,objs[i]);
+      string objs[30]={N("BG"),N("Title"),N("Lang"),N("Mini"),N("Info1"),N("Info2"),N("Buy"),N("Sell"),N("Drag"),N("Send"),N("Clr"),N("Info3"),N("Info4"),N("Help"),N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll"),N("Log"),N("TabM"),N("TabS"),N("CSV"),N("ProfN"),N("PrEx"),N("PrIm")};
+      for(int i=0;i<30;i++) if(ObjectFind(m_chart,objs[i])>=0) ObjectDelete(m_chart,objs[i]);
       ChartRedraw(m_chart);
    }
 };
