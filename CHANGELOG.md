@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here (phase-based).
 
+### Phase 14 — Protection & Prop Accounting Hardening (TD-04) (2026-11-19)
+
+- **Fixed:** `WeekKeyMonday` in `Include/Protection/Protection.mqh` now anchors week 0 to the first Monday of the year (Monday-start weeks). Days before the first Monday form a partial first week (weekIndex=0). Previously the week index calculation could produce negative indices for early-year dates.
+- **Added test:** `Tests/Phase14/MinimalProtection_Test.mq5` — deterministic checks for fresh protection init and prop firm enable/load preset.
+- **Added test:** `Tests/Phase14/Protection_Prop_Test.mq5` — deterministic checks for weekly/monthly loss calculation, daily/weekly/monthly reset, restart persistence, commission/swap/fee inclusion, partial close accounting, daily DD, max DD, equity/balance reference, risk-increasing block, profit target, min trading days, consistency.
+- **All Phase 14 tests compile clean:** 0 errors, 0 warnings in MetaEditor.
+- **TD-04** (weekly/monthly loss tracking/enforcement and prop consistency/profit-target/min-trading-days logic) — protection accounting tests added; runtime demo validation pending.
+- **Zero new trading behavior introduced.**
+
 ### Phase 13 — Hedging & Netting Compatibility (TD-02) (2026-11-19)
 
 - **Fixed:** `PositionStillOpen` in `Include/Trade/TradeLifecycle.mqh`, `Include/Statistics/Statistics.mqh`, and `MoneyManager.mq5` now verifies `POSITION_TYPE` matches the expected side before reporting a position as "still open." Previously, netting reversals (BUY↔SELL with preserved `POSITION_IDENTIFIER`) false-positive matched the new reversed position, causing old directional lifecycles to be misclassified as partial closes instead of completed closes.

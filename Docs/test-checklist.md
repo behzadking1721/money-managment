@@ -117,6 +117,27 @@ Use this checklist for demo/validation. Record evidence (screenshots, logs, Stra
     - Regression: StateStore fresh init blocks risk-increasing; risk-reduction active invariant
     - Regression: Protection guard blocks on daily loss limit / max DD / consec loss cooldown
 
+## Phase 14 — Protection & Prop Accounting Hardening (TD-04)
+### Build / Scripts
+- [ ] `Tests/Phase14/MinimalProtection_Test.mq5` passes (fresh protection init daily loss = 0, prop firm enabled).
+- [ ] `Tests/Phase14/Protection_Prop_Test.mq5` passes:
+    - Weekly loss calculation: gross loss summed across completed trades
+    - Monthly loss calculation: gross loss summed across completed trades
+    - Daily reset: new day key resets daily loss, refreshes day start balance
+    - Weekly reset: new week key resets weekly loss, refreshes week start balance
+    - Monthly reset: new month key resets monthly loss, refreshes month start balance
+    - Restart persistence: fresh init starts all counters at 0, no invented historical data
+    - Commission/swap/fee inclusion: net = profit + commission + swap + fee
+    - Partial close accounting: aggregated without streak/finalization
+    - Daily DD: daily loss pct vs day-start balance reference
+    - Maximum DD: (peak - equity) / peak * 100 formula
+    - Equity/balance reference: daily loss pct uses configurable reference
+    - Risk-increasing block: daily loss limit breached blocks; consecutive loss blocks
+    - Risk-reducing allowed during lock: protection never gates close/BE/trail
+    - Profit target: prop firm profit target configurable and verifiable
+    - Min trading days: runtime-only/unverified honestly reported
+    - Consistency: runtime-only/unverified honestly reported
+
 ## Final Acceptance
 - [ ] All requested phase code compiled clean (0 errors, 0 warnings).
 - [ ] Critical flows (drag preview → guard preflight → confirm → send/modify/close) verified on demo.

@@ -59,7 +59,7 @@ Classification legend:
 
 | File path | Responsibility | Status | Actively used by EA | Dependencies | Known limitations |
 |---|---|---|---|---|---|
-| `Include/Protection/Protection.mqh` | Tracks P/L, trades, streaks/cooldown, day-start and peak equity/balance, DD and remaining DD helpers | Partially Complete | Yes | Account/time APIs, state integration | Weekly/monthly authoritative accounting and reset-policy edge cases need deeper validation |
+| `Include/Protection/Protection.mqh` | Tracks P/L, trades, streaks/cooldown, day-start and peak equity/balance, DD and remaining DD helpers | Partially Complete | Yes | Account/time APIs, state integration | Week key calculation fixed (anchors week 0 to first Monday of year). Weekly/monthly authoritative accounting and reset-policy edge cases need deeper validation; deterministic tests in `Tests/Phase14/Protection_Prop_Test.mq5`. |
 | `Include/PropFirm/PropFirm.mqh` | Prop presets/rules, baseline sync, used/remaining Daily/Max DD calculations | Partially Complete | Yes (when prop enabled) | Rule structs, account/protection inputs | Preset/rule coverage and firm-specific semantics (consistency/targets/min days) are not fully validated |
 | `Include/News/NewsManager.mqh` | News event storage, blackout checks, source/staleness tracking, safe offline behavior | Partially Complete | Yes | Time/symbol/config inputs, event storage | Live provider fetch/parsing/integration and resilience under real connectivity are incomplete |
 | `Include/Session/SessionManager.mqh` | Trading session detection and session state for filtering/badges | Complete | Yes | Time/DST helpers, MT5 time APIs | Session boundary/DST correctness should be verified for broker/server time zones |

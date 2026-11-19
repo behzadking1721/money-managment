@@ -60,11 +60,18 @@ private:
    int WeekKeyMonday(datetime srv)
    {
       MqlDateTime dt; TimeToStruct(srv,dt);
-      int dow=dt.day_of_week; // 0=Sun
-      int mondayBased=(dow==0)?6:(dow-1);
       int doy=dt.day_of_year; if(doy<=0) doy=1;
-      int weekIndex=(doy-1-mondayBased)/7;
-      if(weekIndex<0) weekIndex=0;
+      // Anchor week 0 to the first Monday of the year (Monday-start weeks).
+      // Days before the first Monday form a partial first week (weekIndex=0).
+      MqlDateTime jan1=dt; jan1.mon=1; jan1.day=1; jan1.hour=0; jan1.min=0; jan1.sec=0;
+      datetime jan1Time=StructToTime(jan1);
+      MqlDateTime jan1dt; TimeToStruct(jan1Time,jan1dt);
+      int jan1Dow=jan1dt.day_of_week; // 0=Sun
+      int daysUntilMonday=(1-jan1Dow+7)%7; // days from Jan 1 to first Monday
+      int firstMondayDoy=1+daysUntilMonday;
+      int weekIndex;
+      if(doy < firstMondayDoy) weekIndex=0;
+      else weekIndex=(doy-firstMondayDoy)/7;
       return dt.year*100 + weekIndex;
    }
 

@@ -188,6 +188,21 @@
   - Documentation set (baseline, module status, roadmap, technical debt) reflects shipped behavior and known limitations.
 - **Relevant tests:** Full `Tests/*` suite as applicable, `Docs/test-checklist.md`, Strategy Tester scenarios if/when added, CI compile workflow verification.
 
+## Phase 14 — Protection & Prop Accounting Hardening (TD-04)
+
+- **Objective:** Harden protection accounting and prop firm rule enforcement with deterministic test coverage, focusing on weekly/monthly loss tracking, reset policies, and prop accounting correctness.
+- **Existing modules to reuse:** `Include/Protection/Protection.mqh`, `Include/PropFirm/PropFirm.mqh`, `Include/Guards/ProtectionGuard.mqh`, `Include/Guards/PropGuard.mqh`.
+- **Expected changes:**
+  - Fix week key calculation to anchor week 0 to the first Monday of the year (`WeekKeyMonday` in Protection.mqh).
+  - Add deterministic tests for weekly/monthly loss calculation, reset behavior, commission/swap/fee inclusion, partial close accounting, DD checks, equity/balance reference, risk-increasing block, profit target, min trading days, consistency.
+  - All tests compile clean (0 errors, 0 warnings).
+- **Dependencies:** Phases 7–8 (correct limit sources), Protection/PropFirm modules.
+- **Acceptance criteria:**
+  - Weekly/monthly loss tracking is deterministic across resets.
+  - Prop accounting (profit target, min trading days, consistency) is honestly reported as runtime-only/unverified where applicable.
+  - Risk-increasing block works correctly when limits are breached; risk-reducing actions are never gated.
+- **Relevant tests:** `Tests/Phase14/MinimalProtection_Test.mq5`, `Tests/Phase14/Protection_Prop_Test.mq5`.
+
 ## Persistence & Recovery (next phase priority — not an independent roadmap phase)
 
 There is **no independent "Persistence and Recovery Engine" phase** in the roadmap. Persistence/recovery safety gaps are addressed as the next phase priority, mapping to tech-debt items **TD-05** (High: state persistence/migration/gating under restart/upgrade/corruption scenarios) and **TD-17** (High: time-fallback impacts on resets/counters if not fully surfaced/gated).
