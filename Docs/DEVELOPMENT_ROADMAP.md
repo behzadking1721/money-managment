@@ -203,6 +203,23 @@
   - Risk-increasing block works correctly when limits are breached; risk-reducing actions are never gated.
 - **Relevant tests:** `Tests/Phase14/MinimalProtection_Test.mq5`, `Tests/Phase14/Protection_Prop_Test.mq5`.
 
+## Phase 15 — Position Management Safety & Reliability
+
+- **Objective:** Harden existing position management operations (Break Even, Trailing Stop, Partial Close, Time-Based Exit) with stops/freeze level checks, tick normalization, server retcode validation, and multi-position safety.
+- **Existing modules to reuse:** `Include/Core/PositionManager.mqh`, `Include/UI/PositionDragTool.mqh`, `MoneyManager.mq5` (OnTick position loop).
+- **Expected changes:**
+  - `MoveToBreakEven`: validate stops level, freeze level, tick normalization, prevent SL loosening, check server retcode, preserve TP.
+  - `TrailStop` (TRAIL_FIXED/TRAIL_ATR/TRAIL_CANDLE): protective-direction-only SL movement, stops/freeze checks, ATR unavailability handling, tick normalization, retcode checking.
+  - `PartialClose`: percent validation (0 < pct < 100), volume step normalization, VOLUME_MIN/MAX checks, remaining-volume validation, retcode checking, never close entire position.
+  - `TimeBasedExit`: maxMinutes <= 0 never triggers close, safe elapsed-time calculation, retcode checking, debounce repeated close attempts.
+  - Multi-position safety: position tickets used throughout, magic/symbol filtering per position, hedging/netting awareness, risk-reducing operations remain available when entry is blocked.
+- **Dependencies:** None (builds on existing modules).
+- **Acceptance criteria:**
+  - All methods compile clean (0 errors, 0 warnings).
+  - MoneyManager.mq5 compiles clean with hardened PositionManager/PositionDragTool.
+  - Deterministic tests cover BE/trail direction, SL protection, invalid ATR, stop/freeze rejection, tick normalization, partial close boundaries, invalid percentages, time exit disabled, multi-position same symbol, magic filtering.
+- **Relevant tests:** `Tests/Phase15/PositionManager_Test.mq5`, `Tests/Phase15/PositionDragTool_Test.mq5`.
+
 ## Persistence & Recovery (next phase priority — not an independent roadmap phase)
 
 There is **no independent "Persistence and Recovery Engine" phase** in the roadmap. Persistence/recovery safety gaps are addressed as the next phase priority, mapping to tech-debt items **TD-05** (High: state persistence/migration/gating under restart/upgrade/corruption scenarios) and **TD-17** (High: time-fallback impacts on resets/counters if not fully surfaced/gated).

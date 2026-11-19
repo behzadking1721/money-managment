@@ -3,6 +3,7 @@
 
 #include "../Core/Contracts.mqh"
 #include <Trade/Trade.mqh>
+#include "../Utils/Common.mqh"
 
 struct MM_PosDragState
 {
@@ -27,6 +28,7 @@ private:
    MM_PosDragState m_pos;
    bool   m_optInMulti;
    bool   m_pendingApply;
+   string m_lastError;
 
    string N(const string s){ return m_pfx+s; }
    void SetHLine(const string name,double price,color clr,int style,int width)
@@ -45,8 +47,54 @@ private:
    double GetHLine(const string name,double defv)
    { if(ObjectFind(m_chart,name)<0) return defv; return ObjectGetDouble(m_chart,name,OBJPROP_PRICE); }
 
+   bool IsStopsLevelOK(string sym, ENUM_POSITION_TYPE type, double currentPrice, double newSL, string &reason)
+   {
+      double stopsLevel = (double)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
+      double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+      if(point <= 0) { reason = "invalid point size"; return false; }
+      double minDist = stopsLevel * point;
+      double dist = MathAbs(currentPrice - newSL);
+      if(dist < minDist) { reason = "SL too close to price (stops level)"; return false; }
+      return true;
+   }
+
+   bool IsFreezeLevelOK(string sym, double volume, string &reason)
+   {
+      double freezeLevel = (double)SymbolInfoInteger(sym, SYMBOL_TRADE_FREEZE_LEVEL);
+      double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+      if(point <= 0) { reason = "invalid point size"; return false; }
+      double minVol = freezeLevel * point;
+      if(volume > 0 && volume < minVol) { reason = "volume below freeze level"; return false; }
+      return true;
+   }
+
+   double NormalizePrice(string sym, double price, string &reason)
+   {
+      int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      if(digits < 0) { reason = "invalid symbol digits"; return 0; }
+      return NormalizeDouble(price, digits);
+   }
+
+   double NormalizeVol(string sym, double vol, string &reason)
+   {
+      double v = NormalizeLot(sym, vol);
+      double minV = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+      double maxV = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
+      if(v < minV) { reason = "volume below minimum"; return 0; }
+      if(v > maxV) { reason = "volume above maximum"; return 0; }
+      return v;
+   }
+
+   bool CheckModifyResult(string sym, ENUM_POSITION_TYPE type, double currentPrice, double newSL, string &reason)
+   {
+      if(!IsStopsLevelOK(sym, type, currentPrice, newSL, reason)) return false;
+      double vol = PositionGetDouble(POSITION_VOLUME);
+      if(!IsFreezeLevelOK(sym, vol, reason)) return false;
+      return true;
+   }
+
 public:
-   CPositionDragTool(){ m_chart=0; m_pfx="MM_PD_"; m_optInMulti=false; m_pendingApply=false; m_pos.Reset(); }
+   CPositionDragTool(){ m_chart=0; m_pfx="MM_PD_"; m_optInMulti=false; m_pendingApply=false; m_pos.Reset(); m_lastError=""; }
 
    void Init(long chart,long magic=0,const string prefix="MM_PD_")
    {
@@ -57,6 +105,7 @@ public:
    bool MultiOptIn(){ return m_optInMulti; }
    void SetMultiOptIn(bool v){ m_optInMulti=v; }
    MM_PosDragState State(){ return m_pos; }
+   string LastError(){ return m_lastError; }
 
    bool SelectTicket(ulong ticket)
    {
@@ -114,54 +163,127 @@ public:
 
    bool ApplyModify()
    {
-      if(!m_pos.active) return false;
+      m_lastError="";
+      if(!m_pos.active) { m_lastError="position not active"; return false; }
       ReadLinesToState();
-      if(!PositionSelectByTicket(m_pos.ticket)){ Clear(); return false; }
-      bool ok = m_trade.PositionModify(m_pos.ticket, m_pos.sl, m_pos.tp);
-      if(ok){ m_pos.dirty=false; m_pendingApply=false; SyncFromServer(); }
-      return ok;
+      if(!PositionSelectByTicket(m_pos.ticket)){ Clear(); m_lastError="position not found"; return false; }
+      string sym = m_pos.symbol;
+      ENUM_POSITION_TYPE type = m_pos.isBuy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+      double currentPrice = (type == POSITION_TYPE_BUY) ? SymbolInfoDouble(sym,SYMBOL_BID) : SymbolInfoDouble(sym,SYMBOL_ASK);
+      double newSL = NormalizePrice(sym, m_pos.sl, m_lastError);
+      if(m_lastError != "") return false;
+      double newTP = NormalizePrice(sym, m_pos.tp, m_lastError);
+      if(m_lastError != "") return false;
+      if(!CheckModifyResult(sym, type, currentPrice, newSL, m_lastError)) return false;
+      bool ok = m_trade.PositionModify(m_pos.ticket, newSL, newTP);
+      if(!ok) { uint rc = m_trade.ResultRetcode(); m_lastError = "PositionModify failed"; return false; }
+      if(m_trade.ResultRetcode() != TRADE_RETCODE_DONE) { uint rc = m_trade.ResultRetcode(); m_lastError = "PositionModify not accepted"; return false; }
+      m_pos.dirty=false; m_pendingApply=false; SyncFromServer();
+      return true;
    }
 
    bool MoveToBE(double extraPoints=0)
    {
-      if(!m_pos.active || !PositionSelectByTicket(m_pos.ticket)) return false;
-      double point=SymbolInfoDouble(m_pos.symbol,SYMBOL_POINT);
-      double be = m_pos.isBuy ? (m_pos.openPrice + extraPoints*point) : (m_pos.openPrice - extraPoints*point);
-      if(m_pos.isBuy && m_pos.sl!=0 && be<=m_pos.sl) return false;
-      if(!m_pos.isBuy && m_pos.sl!=0 && be>=m_pos.sl) return false;
-      m_pos.sl=be; m_pos.dirty=false; SyncLinesFromState();
-      return m_trade.PositionModify(m_pos.ticket, m_pos.sl, m_pos.tp);
+      m_lastError="";
+      if(!m_pos.active || !PositionSelectByTicket(m_pos.ticket)) { m_lastError="position not found"; return false; }
+      string sym = m_pos.symbol;
+      double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+      if(point <= 0) { m_lastError = "invalid point size"; return false; }
+      double be = m_pos.isBuy ? (m_pos.openPrice + extraPoints * point) : (m_pos.openPrice - extraPoints * point);
+      if(m_pos.isBuy && m_pos.sl != 0 && be <= m_pos.sl) { m_lastError = "BE would not improve SL"; return false; }
+      if(!m_pos.isBuy && m_pos.sl != 0 && be >= m_pos.sl) { m_lastError = "BE would not improve SL"; return false; }
+      ENUM_POSITION_TYPE type = m_pos.isBuy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+      double currentPrice = (type == POSITION_TYPE_BUY) ? SymbolInfoDouble(sym,SYMBOL_BID) : SymbolInfoDouble(sym,SYMBOL_ASK);
+      int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      if(digits < 0) { m_lastError = "invalid symbol digits"; return false; }
+      double newSL = NormalizeDouble(be, digits);
+      if(!CheckModifyResult(sym, type, currentPrice, newSL, m_lastError)) return false;
+      double newTP = NormalizePrice(sym, m_pos.tp, m_lastError);
+      if(m_lastError != "") return false;
+      m_pos.sl = newSL; m_pos.dirty = false; SyncLinesFromState();
+      bool ok = m_trade.PositionModify(m_pos.ticket, newSL, newTP);
+      if(!ok) { uint rc = m_trade.ResultRetcode(); m_lastError = "PositionModify failed"; return false; }
+      if(m_trade.ResultRetcode() != TRADE_RETCODE_DONE) { uint rc = m_trade.ResultRetcode(); m_lastError = "PositionModify not accepted"; return false; }
+      return true;
    }
 
    bool ApplyTrailOnce(ENUM_TRAILING_MODE mode,double value,ENUM_TIMEFRAMES tf=PERIOD_H1)
    {
-      if(!m_pos.active || !PositionSelectByTicket(m_pos.ticket)) return false;
-      double point=SymbolInfoDouble(m_pos.symbol,SYMBOL_POINT);
-      double price=PositionGetDouble(POSITION_PRICE_CURRENT);
-      double newSL=m_pos.sl;
-      if(mode==TRAIL_FIXED) newSL = m_pos.isBuy ? price-value*point : price+value*point;
-      else if(mode==TRAIL_ATR){ double atr=GetATR(m_pos.symbol,tf,14); newSL = m_pos.isBuy ? price-value*atr : price+value*atr; }
-      else if(mode==TRAIL_CANDLE) newSL = m_pos.isBuy ? iLow(m_pos.symbol,tf,1) : iHigh(m_pos.symbol,tf,1);
-      else return false;
-      if(m_pos.isBuy){ if(m_pos.sl!=0 && newSL<=m_pos.sl) return false; }
-      else { if(m_pos.sl!=0 && newSL>=m_pos.sl) return false; }
-      m_pos.sl=newSL; m_pos.dirty=false; SyncLinesFromState();
-      return m_trade.PositionModify(m_pos.ticket, m_pos.sl, m_pos.tp);
+      m_lastError="";
+      if(!m_pos.active || !PositionSelectByTicket(m_pos.ticket)) { m_lastError="position not found"; return false; }
+      string sym = m_pos.symbol;
+      double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+      if(point <= 0) { m_lastError = "invalid point size"; return false; }
+      double price = PositionGetDouble(POSITION_PRICE_CURRENT);
+      ENUM_POSITION_TYPE type = m_pos.isBuy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+      double currentPrice = (type == POSITION_TYPE_BUY) ? SymbolInfoDouble(sym,SYMBOL_BID) : SymbolInfoDouble(sym,SYMBOL_ASK);
+      double newSL = m_pos.sl;
+      if(mode == TRAIL_FIXED) newSL = m_pos.isBuy ? price - value * point : price + value * point;
+      else if(mode == TRAIL_ATR)
+      {
+         double atr = GetATR(sym, tf, 14);
+         if(atr <= 0) { m_lastError = "ATR unavailable"; return false; }
+         newSL = m_pos.isBuy ? price - value * atr : price + value * atr;
+      }
+      else if(mode == TRAIL_CANDLE)
+      {
+         if(tf <= 0) { m_lastError = "invalid timeframe"; return false; }
+         newSL = m_pos.isBuy ? iLow(sym, tf, 1) : iHigh(sym, tf, 1);
+         if(newSL <= 0) { m_lastError = "candle price invalid"; return false; }
+      }
+      else { m_lastError = "unsupported trailing mode"; return false; }
+      int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      if(digits < 0) { m_lastError = "invalid symbol digits"; return false; }
+      newSL = NormalizeDouble(newSL, digits);
+      if(m_pos.sl != 0)
+      {
+         if(m_pos.isBuy && newSL <= m_pos.sl) { m_lastError = "trail SL not above current SL"; return false; }
+         if(!m_pos.isBuy && newSL >= m_pos.sl) { m_lastError = "trail SL not below current SL"; return false; }
+      }
+      if(!CheckModifyResult(sym, type, currentPrice, newSL, m_lastError)) return false;
+      double newTP = NormalizePrice(sym, m_pos.tp, m_lastError);
+      if(m_lastError != "") return false;
+      m_pos.sl = newSL; m_pos.dirty = false; SyncLinesFromState();
+      bool ok = m_trade.PositionModify(m_pos.ticket, newSL, newTP);
+      if(!ok) { uint rc = m_trade.ResultRetcode(); m_lastError = "PositionModify failed"; return false; }
+      if(m_trade.ResultRetcode() != TRADE_RETCODE_DONE) { uint rc = m_trade.ResultRetcode(); m_lastError = "PositionModify not accepted"; return false; }
+      return true;
    }
 
    bool PartialClose(double percent)
    {
-      if(!m_pos.active || !PositionSelectByTicket(m_pos.ticket)) return false;
-      double vol=SymbolInfoDouble(m_pos.symbol, SYMBOL_VOLUME_MIN); // unused guard
-      vol=PositionGetDouble(POSITION_VOLUME);
-      double closeVol=NormalizeLot(m_pos.symbol, vol*percent/100.0);
-      if(closeVol<=0 || closeVol>=vol) return false;
+      m_lastError="";
+      if(!m_pos.active || !PositionSelectByTicket(m_pos.ticket)) { m_lastError="position not found"; return false; }
+      string sym = m_pos.symbol;
+      double vol = PositionGetDouble(POSITION_VOLUME);
+      if(percent <= 0.0 || percent >= 100.0) { m_lastError = "percent must be > 0 and < 100"; return false; }
+      double closeVol = vol * percent / 100.0;
+      closeVol = NormalizeVol(sym, closeVol, m_lastError);
+      if(m_lastError != "") return false;
+      double remainingVol = vol - closeVol;
+      double minVol = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+      if(remainingVol < minVol) { m_lastError = "remaining volume below minimum"; return false; }
+      ENUM_POSITION_TYPE type = m_pos.isBuy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+      double currentPrice = (type == POSITION_TYPE_BUY) ? SymbolInfoDouble(sym,SYMBOL_BID) : SymbolInfoDouble(sym,SYMBOL_ASK);
+      if(!IsFreezeLevelOK(sym, closeVol, m_lastError)) return false;
       bool ok = m_trade.PositionClosePartial(m_pos.ticket, closeVol);
-      if(ok) SyncFromServer();
-      return ok;
+      if(!ok) { uint rc = m_trade.ResultRetcode(); m_lastError = "PositionClosePartial failed"; return false; }
+      if(m_trade.ResultRetcode() != TRADE_RETCODE_DONE) { uint rc = m_trade.ResultRetcode(); m_lastError = "PositionClosePartial not accepted"; return false; }
+      SyncFromServer();
+      return true;
    }
 
-   bool CloseSelected(){ if(!m_pos.active) return false; bool ok=m_trade.PositionClose(m_pos.ticket); if(ok) Clear(); return ok; }
+   bool CloseSelected()
+   {
+      m_lastError="";
+      if(!m_pos.active) { m_lastError="position not active"; return false; }
+      if(!PositionSelectByTicket(m_pos.ticket)) { m_lastError="position not found"; return false; }
+      bool ok = m_trade.PositionClose(m_pos.ticket);
+      if(!ok) { uint rc = m_trade.ResultRetcode(); m_lastError = "PositionClose failed"; return false; }
+      if(m_trade.ResultRetcode() != TRADE_RETCODE_DONE) { uint rc = m_trade.ResultRetcode(); m_lastError = "PositionClose not accepted"; return false; }
+      Clear();
+      return ok;
+   }
 
    bool OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
    {

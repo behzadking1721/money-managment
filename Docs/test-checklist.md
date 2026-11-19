@@ -138,6 +138,32 @@ Use this checklist for demo/validation. Record evidence (screenshots, logs, Stra
     - Min trading days: runtime-only/unverified honestly reported
     - Consistency: runtime-only/unverified honestly reported
 
+## Phase 15 — Position Management Safety & Reliability
+### Build / Scripts
+- [ ] `Tests/Phase15/PositionManager_Test.mq5` passes:
+    - BE BUY/SELL direction safety
+    - Existing SL protection (never loosen)
+    - Invalid ticket handling returns false
+    - Percent validation (0 < pct < 100)
+    - Time exit disabled when maxMinutes <= 0
+    - Volume normalization respects VOLUME_MIN/MAX/STEP
+    - Margin mode awareness (hedging vs netting)
+    - Magic filtering on CloseAll/CloseProfit/CloseLoss
+- [ ] `Tests/Phase15/PositionDragTool_Test.mq5` passes:
+    - BE BUY/SELL direction safety
+    - Existing SL protection
+    - Trailing BUY/SELL (TRAIL_FIXED/TRAIL_ATR/TRAIL_CANDLE)
+    - Invalid ATR/history handling
+    - Stop/freeze distance rejection
+    - Tick-size normalization
+    - Partial close volume boundaries
+    - Invalid percentages rejected
+    - Netting/hedging behavior
+    - Time exit disabled when maxMinutes <= 0
+    - Multiple positions with same symbol
+    - Magic filtering
+    - Failed trade retcodes handled
+
 ## Final Acceptance
 - [ ] All requested phase code compiled clean (0 errors, 0 warnings).
 - [ ] Critical flows (drag preview → guard preflight → confirm → send/modify/close) verified on demo.

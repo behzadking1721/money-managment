@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here (phase-based).
 
+### Phase 15 — Position Management Safety & Reliability (2026-11-19)
+
+- **Hardened:** `Include/Core/PositionManager.mqh` — MoveToBreakEven, TrailStop, PartialClose, TimeBasedExit now check SYMBOL_TRADE_STOPS_LEVEL and SYMBOL_TRADE_FREEZE_LEVEL, normalize SL/price to symbol digits, validate volume against VOLUME_MIN/VOLUME_MAX/VOLUME_STEP, check server retcodes (not just CTrade bool), preserve TP, prevent SL loosening, guard maxMinutes <= 0, avoid repeated close attempts, and track last error/retcode.
+- **Hardened:** `Include/UI/PositionDragTool.mqh` — ApplyModify, MoveToBE, ApplyTrailOnce, PartialClose, CloseSelected now apply the same safety checks (stops/freeze levels, tick normalization, retcode checking, percent validation, remaining-volume validation).
+- **Added test:** `Tests/Phase15/PositionManager_Test.mq5` — BE direction safety, SL protection, invalid ticket handling, percent validation, time exit disabled, volume normalization, margin mode awareness, magic filtering.
+- **Added test:** `Tests/Phase15/PositionDragTool_Test.mq5` — BE/trail direction safety, ATR unavailability, volume boundaries, invalid percentages, stop/freeze rejection, TP preservation, retcode checking.
+- **All Phase 15 tests compile clean:** 0 errors, 0 warnings.
+- **MoneyManager.mq5 compiles clean:** 0 errors, 0 warnings.
+
 ### Phase 14 — Protection & Prop Accounting Hardening (TD-04) (2026-11-19)
 
 - **Fixed:** `WeekKeyMonday` in `Include/Protection/Protection.mqh` now anchors week 0 to the first Monday of the year (Monday-start weeks). Days before the first Monday form a partial first week (weekIndex=0). Previously the week index calculation could produce negative indices for early-year dates.
