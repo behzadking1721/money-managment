@@ -63,7 +63,7 @@ struct SPanelSettings
 #define MM_MAGIC_DEFAULT 20240101
 #define MM_MAX_RETRIES 5
 #define MM_SLIPPAGE_DEFAULT 3
-#define MM_MAX_TP 3
+#define MM_MAX_TP 5
 #define MM_MAX_PARTIAL 3
 
 double NormalizeLot(string symbol, double lot)

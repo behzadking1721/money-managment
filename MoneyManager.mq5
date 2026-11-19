@@ -1,9 +1,10 @@
 ﻿//+------------------------------------------------------------------+
 //|                                                MoneyManager.mq5  |
-//|       Phase 7: hardening wiring (risk/DD/news/logger/guards)     |
+//|     Phase 7: hardening wiring + Phase 2.1 safety corrections     |
+//|     Phase 2.3: risk protection & trade limits (exposure/counting)|
 //+------------------------------------------------------------------+
 #property copyright "Money Manager"
-#property version   "1.70"
+#property version   "1.73"
 #property strict
 
 #include "Include/Utils/Common.mqh"
@@ -83,9 +84,100 @@ CPanelShell g_ui; CDragTool g_drag; CPositionDragTool g_posDrag;
 
 MM_RiskContext g_riskCtx; MM_GuardConfig g_guardCfg; MM_ExecPolicy g_policy;
 MM_DragTemplate g_tpl; bool g_tplSaved=false;
-int g_lastDay=-1;
 bool g_lastConnected=true;
 bool g_lastNewsBlackout=false;
+
+// Phase 2.1: runtime-only account-switch detection (never persisted/logged as identity)
+// Uses MT5 account login value in memory only for best-effort in-session switch detection.
+// Restart continuity cannot be proven without forbidden persistent identity; handled conservatively.
+long g_rtAccountMarker = -1;
+bool g_rtMarkerInitialized = false;
+
+//--- Phase 2.3: completed-trade aggregation & dedup (authoritative protection accounting)
+// Accounting basis: realized net per completed directional trade lifecycle =
+//   sum(profit + commission + swap + fee) from lifecycle deals/position-linked adjustments included exactly once.
+// Daily/weekly/monthly boundaries and cooldown timing use MT5 server time (TimeTradeServer, fallback TimeCurrent).
+// Exposure counting (daily trade limit): actual risk-increasing exposure on DEAL_ENTRY_IN and on netting reversal
+//   opening exposure (DEAL_ENTRY_INOUT leaving opposite position open), deduped by order ticket.
+// Consecutive streak/cooldown: updated once per completed directional trade outcome.
+// Netting note: DEAL_ENTRY_INOUT can preserve POSITION_IDENTIFIER while replacing POSITION_TICKET; it closes previous
+//   directional exposure and opens opposite exposure. Previous and new directional trades must not be merged.
+//   Reversal deal profit is realized on closed portion; commission/swap/fee may not be reliably separable between
+//   close/open sides -> attributed conservatively to the closed lifecycle (no split invention). Limitation documented.
+#define MM_MAX_POS_TRACK 128
+#define MM_MAX_SEEN_DEALS 512
+struct MM_PosCloseTrack
+{
+   long     positionId;      // DEAL_POSITION_ID / POSITION_IDENTIFIER (stable)
+   string   symbol;
+   double   netRealized;     // sum(profit+commission+swap+fee) aggregated once per lifecycle
+   double   closedVolume;
+   bool     seenEntry;
+   bool     finalized;
+   datetime lastEventTime;
+   void Reset(){ positionId=0; symbol=""; netRealized=0; closedVolume=0; seenEntry=false; finalized=false; lastEventTime=0; }
+};
+MM_PosCloseTrack g_posTrack[MM_MAX_POS_TRACK];
+int g_posTrackCount=0;
+ulong g_seenDealTickets[MM_MAX_SEEN_DEALS];
+int g_seenDealCount=0;
+
+int FindActivePosTrack(long positionId)
+{
+   if(positionId<=0) return -1;
+   for(int i=0;i<g_posTrackCount;i++) if(g_posTrack[i].positionId==positionId && !g_posTrack[i].finalized) return i;
+   return -1;
+}
+int AllocPosTrack(long positionId,const string symbol)
+{
+   int idx=FindActivePosTrack(positionId);
+   if(idx>=0) return idx;
+   for(int i=0;i<g_posTrackCount;i++) if(g_posTrack[i].positionId==0){ g_posTrack[i].Reset(); g_posTrack[i].positionId=positionId; g_posTrack[i].symbol=symbol; return i; }
+   // reuse finalized slot (accounting already done) for new logical lifecycle on same identifier
+   for(int i=0;i<g_posTrackCount;i++) if(g_posTrack[i].finalized){ g_posTrack[i].Reset(); g_posTrack[i].positionId=positionId; g_posTrack[i].symbol=symbol; return i; }
+   if(g_posTrackCount<MM_MAX_POS_TRACK){ idx=g_posTrackCount++; g_posTrack[idx].Reset(); g_posTrack[idx].positionId=positionId; g_posTrack[idx].symbol=symbol; return idx; }
+   idx=0; g_posTrack[idx].Reset(); g_posTrack[idx].positionId=positionId; g_posTrack[idx].symbol=symbol; return idx;
+}
+bool IsDealSeen(ulong dealTicket)
+{
+   if(dealTicket==0) return false;
+   int n=g_seenDealCount>MM_MAX_SEEN_DEALS?MM_MAX_SEEN_DEALS:g_seenDealCount;
+   for(int i=0;i<n;i++) if(g_seenDealTickets[i]==dealTicket) return true;
+   return false;
+}
+void MarkDealSeen(ulong dealTicket)
+{
+   if(dealTicket==0) return;
+   if(g_seenDealCount < MM_MAX_SEEN_DEALS) g_seenDealTickets[g_seenDealCount++]=dealTicket;
+   else { g_seenDealTickets[g_seenDealCount % MM_MAX_SEEN_DEALS]=dealTicket; g_seenDealCount = MM_MAX_SEEN_DEALS + ((g_seenDealCount-MM_MAX_SEEN_DEALS+1)%MM_MAX_SEEN_DEALS); }
+}
+bool PositionStillOpen(long positionId,const string symbol)
+{
+   if(positionId<=0) return false;
+   if(PositionSelectByTicket((ulong)positionId)) return (PositionGetDouble(POSITION_VOLUME)>0.0);
+   if(symbol!="" && PositionSelect(symbol))
+   {
+      // netting: POSITION_IDENTIFIER stable across reversal (ticket may change)
+      if((long)PositionGetInteger(POSITION_IDENTIFIER)==positionId || (long)PositionGetInteger(POSITION_TICKET)==positionId)
+         return (PositionGetDouble(POSITION_VOLUME)>0.0);
+   }
+   return false;
+}
+void FinalizeCompletedLifecycle(int idx, datetime evTime)
+{
+   if(idx<0 || idx>=MM_MAX_POS_TRACK) return;
+   if(g_posTrack[idx].finalized) return;
+   double net = g_posTrack[idx].netRealized;
+   g_prot.SyncPeriods(evTime);
+   g_prot.RecordCompletedTrade(net);
+   if(net < 0.0)
+      g_prot.ApplyConsecLossPolicy(EffMaxConsecLoss(), EffCooldownMinutes(), evTime);
+   else
+      g_prot.UpdateCooldown(evTime);
+   if(InpPropFirmEnabled && g_prop.IsEnabled()) g_prop.RecordTradingDay(g_prot.DailyProfit());
+   g_posTrack[idx].finalized=true;
+   g_mmLog.Info("TRADE_COMPLETED","pos="+(string)g_posTrack[idx].positionId+" net="+DoubleToString(net,2)+" dailyLoss="+DoubleToString(g_prot.DailyLoss(),2)+" consecLosses="+(string)g_prot.ConsecutiveLosses()+" tradesToday="+(string)g_prot.TradesToday());
+}
 
 double EffDailyLossLimit(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.dailyLossLimitPct; return InpDailyLossLimit; }
 double EffDailyProfitLimit(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.dailyProfitLimitPct; return InpDailyProfitLimit; }
@@ -99,6 +191,11 @@ double EffMaxSpread(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr) && pr.ma
 bool   EffNewsEnabled(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.newsEnabled; return InpNewsEnabled; }
 bool   EffNewsBlackout(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return (pr.newsBlackoutHigh || InpNewsBlackout); return InpNewsBlackout; }
 bool   EffNewsOfflineBlock(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return (pr.newsOfflineBlock || InpNewsOfflineBlock); return InpNewsOfflineBlock; }
+
+bool StoreReadyForRiskIncreasing()
+{
+   return g_store.IsOperational();
+}
 
 void RefreshRiskContext()
 {
@@ -115,9 +212,12 @@ void RefreshRiskContext()
 
    double bal=AccountInfoDouble(ACCOUNT_BALANCE);
    double eq =AccountInfoDouble(ACCOUNT_EQUITY);
-   double dayStartBal = g_prot.DayStartBalance(); if(dayStartBal<=0) dayStartBal=g_store.DayStartBalance();
-   double dayStartEq  = g_prot.DayStartEquity();  if(dayStartEq<=0)  dayStartEq =g_store.DayStartEquity();
-   g_prot.SyncPeaks(); g_store.SyncPeaks();
+   datetime srv=TimeTradeServer(); if(srv==0) srv=TimeCurrent();
+   g_prot.SyncPeriods(srv);
+   g_prot.UpdateCooldown(srv);
+   double dayStartBal = g_prot.DayStartBalance(); if(dayStartBal<=0) dayStartBal=bal;
+   double dayStartEq  = g_prot.DayStartEquity();  if(dayStartEq<=0)  dayStartEq=eq;
+   g_prot.SyncPeaks();
 
    double remDaily=0, remMax=0;
    double dailyLossMoney = g_prot.DailyLoss();
@@ -146,13 +246,17 @@ void RefreshRiskContext()
                        dayStartBal, remDaily, remMax,
                        0, 0, false, minRisk, maxRisk, 0,
                        0, "");
-   // real aggregate open risk including partial-close aware tracking
+   // Authoritative aggregate open-risk protection for new risk-increasing sizing/preflight (no duplicate formulas).
    g_riskCtx.openRiskMoney = g_stats.CalcOpenRiskMoney(InpMagic, "");
 }
 
 void RefreshGuardConfig()
 {
    g_guardCfg.Reset();
+   datetime srv=TimeTradeServer(); if(srv==0) srv=TimeCurrent();
+   g_prot.SyncPeriods(srv);
+   g_prot.UpdateCooldown(srv);
+
    g_guardCfg.accountMode = InpAccountMode;
    g_guardCfg.protectionEnabled = true;
    g_guardCfg.dailyLossLimitPct = EffDailyLossLimit();
@@ -167,8 +271,12 @@ void RefreshGuardConfig()
    double dayStartBal = g_prot.DayStartBalance(); if(dayStartBal<=0) dayStartBal=AccountInfoDouble(ACCOUNT_BALANCE);
    double dayStartEq  = g_prot.DayStartEquity();  if(dayStartEq<=0)  dayStartEq =AccountInfoDouble(ACCOUNT_EQUITY);
    g_prot.SyncPeaks();
+
+   // Period loss % from realized completed-trade accounting (server-time boundaries), DD from equity peak (consistent with CProtection).
    g_guardCfg.dailyLossPct = g_prot.DailyLossPct(dayStartBal);
    g_guardCfg.dailyProfitPct = g_prot.DailyProfitPct(dayStartBal);
+   g_guardCfg.weeklyLossPct = g_prot.WeeklyLossPct();
+   g_guardCfg.monthlyLossPct = g_prot.MonthlyLossPct();
    g_guardCfg.currentDrawdownPct = g_prot.CurrentDrawdownPct();
    g_guardCfg.tradesToday = g_prot.TradesToday();
    g_guardCfg.consecLosses = g_prot.ConsecutiveLosses();
@@ -188,7 +296,7 @@ void RefreshGuardConfig()
       double todayProfitPct = (dayStartBal>0)?(g_prot.DailyProfit()/dayStartBal*100.0):0.0;
       g_guardCfg.propTodayProfitPct = todayProfitPct;
       g_guardCfg.propWeekendClose = r.weekendClose;
-      g_guardCfg.propMaxTradesPerDay = (r.mode==PROP_CHALLENGE && EffMaxTradesPerDay()>0)?EffMaxTradesPerDay():EffMaxTradesPerDay();
+      g_guardCfg.propMaxTradesPerDay = EffMaxTradesPerDay();
    }
 
    bool newsEnabled = EffNewsEnabled();
@@ -218,8 +326,7 @@ void RefreshGuardConfig()
    }
    g_lastNewsBlackout = inBlackout;
 
-   // sync key state
-   g_store.SyncPeaks();
+   g_prot.SyncPeaks();
 }
 
 void CheckConnectionAlert()
@@ -230,11 +337,118 @@ void CheckConnectionAlert()
    g_lastConnected = conn;
 }
 
+void UpdateStoreStatusUi()
+{
+   if(!StoreReadyForRiskIncreasing())
+   {
+      string why = g_store.StatusReason();
+      if(why=="") why="explicit_resolution_required";
+      g_ui.SetStoreBlockedState(true, why);
+   }
+   else
+   {
+      g_ui.SetStoreBlockedState(false, "");
+   }
+}
+
+void SyncPropBaselineFromRuntime()
+{
+   if(InpPropFirmEnabled)
+   {
+      SPropFirmRules r; g_prop.Init(); g_prop.LoadPreset(InpPropPreset,r); r.mode=InpPropMode; g_prop.Enable(r);
+      g_prop.SyncBaseline(g_prot.StartBalance(), g_prot.PeakEquity());
+   }
+   else g_prop.Init();
+}
+
+// Explicit, user-confirmed initialization of a NEW protective state from current MT5 metrics.
+// - Never called automatically on restart/continuity uncertainty/switch detection.
+// - Preserves previous persisted evidence in StateStore; replaces protective baselines/counters only after confirmation+persist.
+// - Risk-increasing actions remain blocked unless/until this succeeds.
+bool RequestExplicitNewProtectiveInit(const string reason)
+{
+   CUiStrings *ui = g_ui.Strings();
+   string msg = ui.Msg_ConfirmNewInit() + "\n\nReason: " + reason +
+                "\nState: " + g_store.StatusReason();
+   int r = MessageBox(msg, "MoneyManager - Explicit protective initialization", MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2);
+   if(r != IDYES)
+   {
+      g_ui.status.Info("STATE", "Explicit initialization cancelled; risk-increasing actions remain blocked");
+      UpdateStoreStatusUi();
+      return false;
+   }
+
+   g_prot.Init();
+   SyncPropBaselineFromRuntime();
+   double peakEq = g_prot.PeakEquity(); if(peakEq<=0) peakEq=AccountInfoDouble(ACCOUNT_EQUITY);
+   double peakBal= g_prot.PeakBalance(); if(peakBal<=0) peakBal=AccountInfoDouble(ACCOUNT_BALANCE);
+
+   MM_ProfileRecord pr; string activeProfile="";
+   if(g_profiles.GetActive(pr)) activeProfile = pr.profile.id;
+
+   bool ok = g_store.InitializeNewProtectiveStateFromCurrent(g_prot.DayStartBalance(), g_prot.DayStartEquity(),
+                                                              peakEq, peakBal, InpAccountMode, activeProfile, true);
+   if(ok)
+   {
+      g_mmLog.Info("STATE_EXPLICIT_INIT_OK","reason="+reason);
+      g_ui.status.Info("STATE", ui.Msg_InitDone() + " ("+reason+")");
+      g_alerts.Fire("State: Explicit protective initialization completed");
+   }
+   else
+   {
+      g_mmLog.Error("STATE_EXPLICIT_INIT_FAIL","reason="+reason+" store_reason="+g_store.StatusReason());
+      g_ui.status.Warn("STATE", ui.Msg_InitFailed());
+      g_alerts.Fire("State: Explicit protective initialization failed; risk-increasing actions remain blocked");
+   }
+   UpdateStoreStatusUi();
+   return ok;
+}
+
+// Runtime account-switch handling (in-session best-effort).
+// Never auto-resets/rebases persisted protective state; blocks new risk-increasing actions until explicit resolution.
+void HandleRuntimeAccountSwitchIfDetected(const int reason)
+{
+   long marker = AccountInfoInteger(ACCOUNT_LOGIN);
+   if(marker <= 0) return;
+
+   bool switchByReason = (reason == REASON_ACCOUNT);
+   if(!g_rtMarkerInitialized)
+   {
+      g_rtAccountMarker = marker;
+      g_rtMarkerInitialized = true;
+      if(!switchByReason) return;
+   }
+
+   bool switchByMarker = (marker != g_rtAccountMarker);
+   if(!switchByReason && !switchByMarker) return;
+
+   g_rtAccountMarker = marker;
+   g_rtMarkerInitialized = true;
+
+   g_mmLog.Warn("ACCOUNT_SWITCH","Runtime account change detected; blocking risk-increasing actions pending explicit resolution");
+   g_ui.status.Warn("STATE","Account change detected: previous protective state not auto-applied/reset; explicit resolution required");
+   g_alerts.Fire("Account: change detected; explicit resolution required before new risk-increasing actions");
+
+   g_profiles.SetActiveByMode(InpAccountMode);
+   g_stats.SetAccountMode(InpAccountMode);
+   g_prot.Init();
+   SyncPropBaselineFromRuntime();
+
+   g_store.BlockPendingExplicitResolution("runtime_account_switch_explicit_resolution_required", true);
+   UpdateStoreStatusUi();
+}
+
+void HandleStoreResolveRequest();
+
 int OnInit()
 {
-   g_mmLog.Init("mm_"+(string)AccountInfoInteger(ACCOUNT_LOGIN));
+   // Privacy: no account identifiers in logs or persisted state.
+   g_mmLog.Init("mm");
    g_mmLog.Info("INIT","MoneyManager Phase7 init start "+_Symbol);
-   if(!g_store.Init()) { Print("WARN: StateStore init failed"); g_mmLog.Warn("STATE_INIT_FAIL","StateStore init failed"); }
+
+   bool storeInit = g_store.Init();
+   if(!storeInit)
+      g_mmLog.Warn("STATE_INIT_FAIL","StateStore init returned false (unsafe/blocked); reason="+g_store.StatusReason());
 
    g_alerts.Init();
    g_ui.status.SetAlerts(GetPointer(g_alerts));
@@ -245,20 +459,14 @@ int OnInit()
    g_profiles.SetActiveByMode(InpAccountMode);
    g_positions.Init(); g_positions.SetMagic(InpMagic);
    g_prot.Init();
-   g_prot.SyncPeaks();
-   g_store.SyncPeaks();
+   g_posTrackCount=0; g_seenDealCount=0;
    g_news.Init();
    g_session.Init();
    g_stats.Init("MoneyManager_trades.csv");
    g_stats.SetAccountMode(InpAccountMode);
    g_lifecycle.AddListener(GetPointer(g_stats));
 
-   if(InpPropFirmEnabled)
-   {
-      SPropFirmRules r; g_prop.Init(); g_prop.LoadPreset(InpPropPreset,r); r.mode=InpPropMode; g_prop.Enable(r);
-      g_prop.SyncBaseline(g_prot.StartBalance(), g_prot.PeakEquity());
-   }
-   else g_prop.Init();
+   SyncPropBaselineFromRuntime();
 
    g_policy.Reset(); g_policy.maxSlippagePoints=InpSlippage;
 
@@ -273,44 +481,83 @@ int OnInit()
    g_ui.SetStats(g_stats);
    g_ui.SetProfiles(g_profiles);
    g_ui.SetAccountMode(InpAccountMode);
+   g_ui.SetStoreResolutionHandler(HandleStoreResolveRequest);
    g_ui.Create();
 
-   MqlDateTime dt; TimeToStruct(TimeCurrent(),dt); g_lastDay=dt.day;
+   // Runtime-only account marker (never persisted).
+   g_rtAccountMarker = AccountInfoInteger(ACCOUNT_LOGIN);
+   g_rtMarkerInitialized = (g_rtAccountMarker > 0);
+
+   // Conservative continuity: do NOT auto-reset/rebase protective state.
+   if(!StoreReadyForRiskIncreasing())
+   {
+      g_mmLog.Warn("STATE_RESOLUTION_REQUIRED","Risk-increasing actions blocked pending explicit resolution; reason="+g_store.StatusReason());
+      g_ui.status.Warn("STATE", g_ui.Strings().Msg_StateBlocked());
+      g_alerts.Fire("State: Risk-increasing actions blocked until explicit resolution");
+   }
+   else
+   {
+      g_mmLog.Info("STATE_READY","Store operational");
+   }
+   UpdateStoreStatusUi();
+
    g_lastConnected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
    g_lastNewsBlackout=false;
    EventSetTimer(1);
    g_mmLog.Info("INIT_OK","Money Manager Phase7 initialized magic="+(string)InpMagic);
-   Print("Money Manager EA Phase7 initialized.");
+   Print("Money Manager EA Phase7 initialized. Risk-increasing actions: " + (StoreReadyForRiskIncreasing()?"READY":"BLOCKED (explicit resolution required)"));
    return(INIT_SUCCEEDED);
 }
 
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   // REASON_ACCOUNT: runtime/account change lifecycle signal (in-memory handling only)
+   if(reason == REASON_ACCOUNT)
+      HandleRuntimeAccountSwitchIfDetected(reason);
+
    g_drag.Deactivate();
    g_posDrag.Clear();
    g_ui.Destroy();
    g_profiles.SaveAll();
-   g_store.SyncPeaks();
-   g_store.Save();
+   // Persist only if store is operational/safe.
+   if(StoreReadyForRiskIncreasing()) g_store.Save();
    g_stats.CloseCSV();
    g_mmLog.Info("DEINIT","reason="+(string)reason);
 }
 
+void HandleStoreResolveRequest()
+{
+   // Explicit user-triggered resolution entry point from UI.
+   if(StoreReadyForRiskIncreasing())
+   {
+      g_ui.status.Info("STATE","Store already operational");
+      return;
+   }
+
+   string reason = g_store.StatusReason();
+   if(reason=="") reason="explicit_resolution_requested";
+   bool ok = RequestExplicitNewProtectiveInit(reason);
+   if(!ok && g_store.HasRestoredProtectiveState() && !g_store.IsContinuityCertain())
+   {
+      g_ui.status.Warn("STATE", g_ui.Strings().Msg_RestoreDenied());
+   }
+   UpdateStoreStatusUi();
+}
+
 void OnTick()
 {
+   HandleRuntimeAccountSwitchIfDetected(0);
+
    g_session.Update();
-   MqlDateTime dt; TimeToStruct(TimeCurrent(),dt);
-   if(dt.day!=g_lastDay)
-   {
-      g_prot.NewDay();
-      g_store.SyncPeaks();
-      g_store.Save();
-      g_lastDay=dt.day;
-      g_mmLog.Info("DAY_RESET","New trading day");
-   }
+   datetime srv=TimeTradeServer(); if(srv==0) srv=TimeCurrent();
+   // Server-time daily/weekly/monthly boundary sync and cooldown expiry (no historical invention).
+   g_prot.SyncPeriods(srv);
+   g_prot.UpdateCooldown(srv);
    CheckConnectionAlert();
    g_prot.SyncPeaks();
+
+   // Risk-reducing/existing-position management remains active where possible, even when store/limits block new risk-increasing entries.
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i); if(ticket==0) continue;
@@ -327,19 +574,26 @@ void OnTick()
       if(InpTrailMode!=TRAIL_NONE) g_positions.TrailStop(ticket,InpTrailMode,InpTrailValue);
       if(InpMaxMinutesInTrade>0) g_positions.TimeBasedExit(ticket,InpMaxMinutesInTrade);
    }
+
    g_drag.OnTickUpdate();
    g_posDrag.OnTick();
    RefreshRiskContext();
    RefreshGuardConfig();
    g_ui.SetAccountMode(InpAccountMode);
+   UpdateStoreStatusUi();
    g_ui.Update(g_session, g_news, g_drag, g_risk, g_stops, g_guards, g_riskCtx, g_guardCfg);
 }
 
 void OnTimer()
 {
+   HandleRuntimeAccountSwitchIfDetected(0);
+   datetime srv=TimeTradeServer(); if(srv==0) srv=TimeCurrent();
+   g_prot.SyncPeriods(srv);
+   g_prot.UpdateCooldown(srv);
    CheckConnectionAlert();
    RefreshRiskContext();
    RefreshGuardConfig();
+   UpdateStoreStatusUi();
 }
 
 void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
@@ -364,21 +618,133 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
                         const MqlTradeResult& result)
 {
    g_lifecycle.OnTradeTransaction(trans,request,result);
-   // keep protection/trade counters in sync with closed deals
+
+   // Phase 2.3 protection accounting (authoritative, deduped):
+   // - Exposure (daily trade limit): count on DEAL_ENTRY_IN and on netting reversal opening exposure
+   //   (DEAL_ENTRY_INOUT leaving opposite position open), deduped by order ticket (pending only when filled).
+   // - Completed directional trade outcome: aggregate realized net per logical lifecycle =
+   //   sum(profit + commission + swap + fee) from DEAL_ENTRY_IN (entry costs, when applicable) + all DEAL_ENTRY_OUT
+   //   + DEAL_ENTRY_INOUT closing portions + position-linked broker adjustments, each deal included exactly once.
+   //   Partial closes aggregate but do not finalize. Full close or netting reversal boundary finalizes once.
+   // - DEAL_ENTRY_INOUT (netting reversal): closes previous directional exposure and opens opposite exposure while
+   //   POSITION_IDENTIFIER may be preserved (POSITION_TICKET may change). Previous/new logical lifecycles must not merge.
+   //   Reversal deal profit is for closed portion; commission/swap/fee may be inseparable close vs open -> attributed
+   //   conservatively to closed lifecycle (no split invention). If separation is not reliable, no invented allocation.
+   //   Hedging: separate identifiers/lifecycles handled independently. Balance/credit excluded.
+   //   Late-posted adjustments after finalization cannot be re-accounted (no invention).
    if(trans.type==TRADE_TRANSACTION_DEAL_ADD && HistoryDealSelect(trans.deal))
    {
-      ENUM_DEAL_ENTRY entry=(ENUM_DEAL_ENTRY)HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
-      ENUM_DEAL_TYPE  dt=(ENUM_DEAL_TYPE)HistoryDealGetInteger(trans.deal, DEAL_TYPE);
-      if((entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_INOUT) && (dt==DEAL_TYPE_BUY || dt==DEAL_TYPE_SELL))
+      ulong dealTicket = trans.deal;
+      if(IsDealSeen(dealTicket)) return; // avoid duplicate processing of transaction events
+
+      ENUM_DEAL_TYPE dt=(ENUM_DEAL_TYPE)HistoryDealGetInteger(trans.deal, DEAL_TYPE);
+      long posId=(long)HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
+      if(posId==0) posId=(long)trans.position;
+      string sym=trans.symbol; if(sym=="") sym=(string)HistoryDealGetString(trans.deal, DEAL_SYMBOL);
+      double profit=HistoryDealGetDouble(trans.deal, DEAL_PROFIT);
+      double comm=HistoryDealGetDouble(trans.deal, DEAL_COMMISSION);
+      double swap=HistoryDealGetDouble(trans.deal, DEAL_SWAP);
+      double fee=HistoryDealGetDouble(trans.deal, DEAL_FEE);
+      double dealNet = profit + comm + swap + fee;
+      double vol=HistoryDealGetDouble(trans.deal, DEAL_VOLUME);
+      ulong orderTicket=(ulong)HistoryDealGetInteger(trans.deal, DEAL_ORDER);
+      datetime evTime=(datetime)HistoryDealGetInteger(trans.deal, DEAL_TIME);
+      if(evTime==0){ evTime=TimeTradeServer(); if(evTime==0) evTime=TimeCurrent(); }
+
+      if(dt!=DEAL_TYPE_BUY && dt!=DEAL_TYPE_SELL)
       {
-         double profit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT)+HistoryDealGetDouble(trans.deal, DEAL_COMMISSION)+HistoryDealGetDouble(trans.deal, DEAL_SWAP);
-         g_prot.RecordTrade(profit);
-         if(InpPropFirmEnabled && g_prop.IsEnabled()) g_prop.RecordTradingDay(g_prot.DailyProfit());
-         g_mmLog.Info("DEAL_CLOSE","profit="+DoubleToString(profit,2)+" dailyLoss="+DoubleToString(g_prot.DailyLoss(),2));
+         // Broker-specific posting: position-linked commission/fee/correction deals aggregated into active lifecycle net if not yet finalized.
+         // Exclude balance/credit (not trade P/L). Do not invent or re-open finalized accounting.
+         if(posId>0 && dt!=DEAL_TYPE_BALANCE && dt!=DEAL_TYPE_CREDIT)
+         {
+            int ti=FindActivePosTrack(posId);
+            if(ti>=0)
+            {
+               g_posTrack[ti].netRealized += dealNet;
+               if(sym!="") g_posTrack[ti].symbol=sym;
+               g_posTrack[ti].lastEventTime=evTime;
+            }
+         }
+         MarkDealSeen(dealTicket);
+         return;
       }
-      if(entry==DEAL_ENTRY_IN && (dt==DEAL_TYPE_BUY || dt==DEAL_TYPE_SELL))
+
+      ENUM_DEAL_ENTRY entry=(ENUM_DEAL_ENTRY)HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+      MarkDealSeen(dealTicket);
+
+      if(entry==DEAL_ENTRY_IN)
       {
-         g_store.SyncPeaks();
+         // Actual exposure created (market or filled pending). Count once per entry order (partial fills same order do not increment).
+         // Include entry deal net (profit/commission/swap/fee, e.g. entry commission or fee when applicable) in lifecycle aggregation.
+         if(posId>0)
+         {
+            int ti=AllocPosTrack(posId,sym);
+            if(ti>=0)
+            {
+               g_posTrack[ti].seenEntry=true;
+               if(sym!="") g_posTrack[ti].symbol=sym;
+               g_posTrack[ti].lastEventTime=evTime;
+               g_posTrack[ti].netRealized += dealNet;
+            }
+         }
+         bool counted = g_prot.RegisterExposureOrder(orderTicket, dealTicket);
+         if(counted)
+            g_mmLog.Info("EXPOSURE_COUNT","order="+(string)orderTicket+" pos="+(string)posId+" tradesToday="+(string)g_prot.TradesToday());
+      }
+      else if(entry==DEAL_ENTRY_OUT)
+      {
+         if(posId<=0) return; // cannot aggregate reliably; do not guess
+         int ti=FindActivePosTrack(posId);
+         if(ti<0) ti=AllocPosTrack(posId,sym);
+         if(ti<0) return;
+         g_posTrack[ti].netRealized += dealNet;
+         g_posTrack[ti].closedVolume += vol;
+         if(sym!="") g_posTrack[ti].symbol=sym;
+         g_posTrack[ti].lastEventTime = evTime;
+         bool stillOpen = PositionStillOpen(posId, g_posTrack[ti].symbol);
+         if(!stillOpen)
+            FinalizeCompletedLifecycle(ti, evTime); // completed directional lifecycle -> single accounting update
+         // Partial close: aggregated, no streak update, no exposure count increment.
+      }
+      else if(entry==DEAL_ENTRY_INOUT)
+      {
+         if(posId<=0) return; // cannot aggregate reliably; do not guess
+         int ti=FindActivePosTrack(posId);
+         if(ti<0) ti=AllocPosTrack(posId,sym);
+         if(ti<0) return;
+
+         // INOUT: add full deal financials (profit+commission+swap+fee) to current directional lifecycle.
+         // Profit belongs to closed portion; commission/swap/fee may not be separable close vs open -> conservative attribution to closed lifecycle, no invented split.
+         g_posTrack[ti].netRealized += dealNet;
+         g_posTrack[ti].closedVolume += vol;
+         if(sym!="") g_posTrack[ti].symbol=sym;
+         g_posTrack[ti].lastEventTime = evTime;
+
+         bool stillOpen = PositionStillOpen(posId, g_posTrack[ti].symbol);
+         if(stillOpen)
+         {
+            // Netting reversal: previous directional trade closed, opposite exposure remains open under preserved POSITION_IDENTIFIER (ticket may change).
+            // Finalize previous lifecycle once; start new logical lifecycle for opposite exposure without merging/carryover (no split invention).
+            FinalizeCompletedLifecycle(ti, evTime);
+            int ni=AllocPosTrack(posId, sym);
+            if(ni>=0)
+            {
+               g_posTrack[ni].seenEntry=true;
+               if(sym!="") g_posTrack[ni].symbol=sym;
+               g_posTrack[ni].lastEventTime=evTime;
+               g_posTrack[ni].netRealized=0.0;
+               g_posTrack[ni].closedVolume=0.0;
+               g_posTrack[ni].finalized=false;
+            }
+            bool counted = g_prot.RegisterExposureOrder(orderTicket, dealTicket);
+            if(counted)
+               g_mmLog.Info("EXPOSURE_COUNT","order="+(string)orderTicket+" pos="+(string)posId+" tradesToday="+(string)g_prot.TradesToday()+" reason=netting_reversal");
+         }
+         else
+         {
+            // Fully closed by this deal (no remaining opposite exposure).
+            FinalizeCompletedLifecycle(ti, evTime);
+         }
       }
    }
 }

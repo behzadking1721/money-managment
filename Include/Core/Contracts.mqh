@@ -6,7 +6,7 @@
 #define MM_CONTRACTS_MQH
 
 #define MM_CONTRACT_VERSION 1
-#define MM_MAX_TP_LEVELS    3
+#define MM_MAX_TP_LEVELS    5
 #define MM_MAX_CAPS         16
 #define MM_MAX_WARNINGS     16
 #define MM_MAX_REASON       128

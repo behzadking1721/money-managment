@@ -22,6 +22,8 @@
 #include "../Session/SessionManager.mqh"
 #include "../News/NewsManager.mqh"
 
+typedef void (*MM_StoreResolveHandler)();
+
 class CPanelShell
 {
 private:
@@ -36,6 +38,9 @@ private:
    CStatistics     *m_stats;
    CProfileManager *m_profiles;
    ENUM_MM_ACCOUNT_MODE m_accMode;
+   bool m_storeBlocked;
+   string m_storeBlockedReason;
+   MM_StoreResolveHandler m_storeResolveHandler;
 
    string N(const string s){ return m_pfx+s; }
    void Rect(const string name,int x,int y,int w,int h,color bg,color border)
@@ -81,7 +86,7 @@ public:
    CPreviewOverlay preview;
    CStatusLog     status;
 
-   CPanelShell(){ m_chart=0; m_sym=_Symbol; m_pfx="MM_UI_"; m_mini=true; m_hidden=false; m_langFA=false; m_dragMode=false; m_tab=0; m_x=10; m_y=50; m_wMini=300; m_hMini=92; m_wDrawer=340; m_hDrawer=250; m_stats=NULL; m_profiles=NULL; m_accMode=ACCOUNT_PERSONAL; }
+   CPanelShell(){ m_chart=0; m_sym=_Symbol; m_pfx="MM_UI_"; m_mini=true; m_hidden=false; m_langFA=false; m_dragMode=false; m_tab=0; m_x=10; m_y=50; m_wMini=300; m_hMini=92; m_wDrawer=340; m_hDrawer=250; m_stats=NULL; m_profiles=NULL; m_accMode=ACCOUNT_PERSONAL; m_storeBlocked=false; m_storeBlockedReason=""; m_storeResolveHandler=NULL; }
 
    void Init(long chart,const string symbol,int x=10,int y=50)
    {
@@ -99,6 +104,10 @@ public:
    void SetStats(CStatistics &s){ m_stats=GetPointer(s); }
    void SetProfiles(CProfileManager &p){ m_profiles=GetPointer(p); }
    void SetAccountMode(ENUM_MM_ACCOUNT_MODE m){ m_accMode=m; }
+   void SetStoreResolutionHandler(MM_StoreResolveHandler handler){ m_storeResolveHandler=handler; }
+   void SetStoreBlockedState(bool blocked, const string reason){ m_storeBlocked=blocked; m_storeBlockedReason=reason; }
+   bool StoreBlocked(){ return m_storeBlocked; }
+   string StoreBlockedReason(){ return m_storeBlockedReason; }
 
    void Create()
    {
@@ -115,6 +124,7 @@ public:
       Btn(N("Drag"), m_x+104, by, 50, 20, m_ui.S_DragMode(), m_dragMode?clrDarkOrange:clrSlateGray, clrWhite, m_ui.Tip_Drag());
       Btn(N("Send"), m_x+158, by, 56, 20, m_ui.S_Send(), clrSteelBlue, clrWhite, m_ui.Tip_Send());
       Btn(N("Clr"),  m_x+218, by, 40, 20, m_ui.S_Clear(), clrDimGray, clrWhite, m_ui.Tip_Clear());
+      Btn(N("Resolve"), m_x+262, by, 52, 20, m_ui.S_Resolve(), clrDarkOrange, clrWhite, m_ui.Tip_Resolve());
       if(!m_mini)
       {
          Btn(N("TabM"), m_x+262, m_y+28, 36, 16, m_ui.S_Main(), (m_tab==0)?clrDarkSlateBlue:clrSlateGray, clrWhite, m_ui.Tip_TabMain());
@@ -140,6 +150,7 @@ public:
          Btn(N("PrIm"),  m_x+168, m_y+142, 52, 18, m_ui.S_Import(), clrDarkSlateBlue, clrWhite, m_ui.Tip_ProfileImport());
 
          Lbl(N("Log"), m_x+8, m_y+188, "", clrLightGray, 8);
+         Lbl(N("State"), m_x+8, m_y+204, "", clrTomato, 8);
       }
       ApplyVisibility();
       ChartRedraw(m_chart);
@@ -148,11 +159,12 @@ public:
    void ApplyVisibility()
    {
       bool show = !m_hidden;
-      string base[11]={N("BG"),N("Title"),N("Lang"),N("Mini"),N("Info1"),N("Info2"),N("Buy"),N("Sell"),N("Drag"),N("Send"),N("Clr")};
-      for(int i=0;i<11;i++) ShowObj(base[i],show);
+      string base[12]={N("BG"),N("Title"),N("Lang"),N("Mini"),N("Info1"),N("Info2"),N("Buy"),N("Sell"),N("Drag"),N("Send"),N("Clr"),N("Resolve")};
+      for(int i=0;i<12;i++) ShowObj(base[i],show);
+      ShowObj(N("Resolve"), show && m_storeBlocked);
       bool dr = show && !m_mini;
-      string tabsAndInfo[6]={N("TabM"),N("TabS"),N("Info3"),N("Info4"),N("Help"),N("Log")};
-      for(int i=0;i<6;i++) ShowObj(tabsAndInfo[i],dr);
+      string tabsAndInfo[7]={N("TabM"),N("TabS"),N("Info3"),N("Info4"),N("Help"),N("Log"),N("State")};
+      for(int i=0;i<7;i++) ShowObj(tabsAndInfo[i],dr);
       bool mainTab = dr && (m_tab==0);
       bool statsTab = dr && (m_tab==1);
       string mainBtns[9]={N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll")};
@@ -190,7 +202,8 @@ public:
       Lbl(N("Info1"), m_x+8, m_y+28, m_ui.S_Spread()+": "+DoubleToString(sp,1)+"  "+m_ui.S_Connection()+":"+conn+"/"+perm, clrSilver, 9);
       string modeStr = drag.Active()? (drag.IsBuy()?m_ui.S_Buy():m_ui.S_Sell()) : m_ui.S_Idle();
       string smode = (drag.SizingMode()==SIZING_AUTO_RISK)? (m_ui.S_Risk()+"%") : m_ui.S_Lot();
-      Lbl(N("Info2"), m_x+8, m_y+44, m_ui.S_Mode()+": "+modeStr+"  "+smode+": "+DoubleToString(drag.RiskValue(),2), clrSilver, 9);
+      string blockedTag = m_storeBlocked ? ("  ["+m_ui.S_Blocked()+"]") : "";
+      Lbl(N("Info2"), m_x+8, m_y+44, m_ui.S_Mode()+": "+modeStr+"  "+smode+": "+DoubleToString(drag.RiskValue(),2)+blockedTag, m_storeBlocked?clrTomato:clrSilver, 9);
 
       if(!m_mini)
       {
@@ -211,7 +224,8 @@ public:
          }
          else
          {
-            string rs = drag.Active()? (m_ui.S_Entry()+"="+DoubleToString(drag.Entry(),(int)SymbolInfoInteger(m_sym,SYMBOL_DIGITS))+" SL="+DoubleToString(drag.SL(),(int)SymbolInfoInteger(m_sym,SYMBOL_DIGITS))) : "";
+            string tpDisp = drag.Active()? (drag.TpCount()>1?("x"+(string)drag.TpCount()):DoubleToString(drag.TP1(),(int)SymbolInfoInteger(m_sym,SYMBOL_DIGITS))) : "";
+            string rs = drag.Active()? (m_ui.S_Entry()+"="+DoubleToString(drag.Entry(),(int)SymbolInfoInteger(m_sym,SYMBOL_DIGITS))+" SL="+DoubleToString(drag.SL(),(int)SymbolInfoInteger(m_sym,SYMBOL_DIGITS))+" TP="+tpDisp) : "";
             Lbl(N("Info3"), m_x+8, m_y+88, rs, clrSilver, 9);
             MM_RiskResult rr = preview.LastRisk();
             string rs2 = drag.Active()? (m_ui.S_Lot()+"="+DoubleToString(rr.lot,2)+" "+m_ui.S_Risk()+"="+DoubleToString(rr.riskPercent,2)+"% "+m_ui.S_RR()+"="+DoubleToString(rr.rr,2)) : "";
@@ -220,10 +234,14 @@ public:
             Lbl(N("Help"),  m_x+8, m_y+120, m_ui.S_Help(), clrGray, 8);
             Lbl(N("Log"),   m_x+8, m_y+188, status.LastLine(), clrLightGray, 8);
          }
+         string st = m_storeBlocked ? (m_ui.S_StateBlocked()+": "+m_storeBlockedReason) : "";
+         Lbl(N("State"), m_x+8, m_y+204, st, clrTomato, 8);
          Btn(N("TabM"), m_x+262, m_y+28, 36, 16, m_ui.S_Main(), (m_tab==0)?clrDarkSlateBlue:clrSlateGray);
          Btn(N("TabS"), m_x+262, m_y+46, 36, 16, m_ui.S_Stats(), (m_tab==1)?clrDarkSlateBlue:clrSlateGray);
       }
       Btn(N("Drag"), m_x+104, m_y + 64, 50, 20, m_ui.S_DragMode(), m_dragMode?clrDarkOrange:clrSlateGray);
+      Btn(N("Resolve"), m_x+262, m_y + 64, 52, 20, m_ui.S_Resolve(), m_storeBlocked?clrDarkOrange:clrSlateGray, clrWhite, m_ui.Tip_Resolve());
+      ApplyVisibility();
       ChartRedraw(m_chart);
    }
 
@@ -247,6 +265,12 @@ public:
          if(sparam==N("RiskUp")){ drag.AdjustRisk(0.25); return true; }
          if(sparam==N("RiskDn")){ drag.AdjustRisk(-0.25); return true; }
          if(sparam==N("Send")){ TrySend(drag, router, ctx, gcfg, policy); return true; }
+         if(sparam==N("Resolve")){
+            status.Info("STATE","Explicit resolution requested");
+            if(m_storeResolveHandler!=NULL) m_storeResolveHandler();
+            else status.Warn("STATE","No resolution handler available");
+            return true;
+         }
          if(sparam==N("PosSel")){
             if(!posDrag.SelectCurrent(m_sym,0)) posDrag.SelectCurrent("",0);
             status.Info("POS", posDrag.Active()?("Selected #"+(string)posDrag.Ticket()):"No position");
@@ -305,6 +329,7 @@ public:
          if(k==68){ m_dragMode=!m_dragMode; if(m_dragMode && !drag.Active()) drag.Activate(true); return true; } // D
          if(k==66){ m_dragMode=true; drag.Activate(true); return true; } // B
          if(k==83){ m_dragMode=true; drag.Activate(false); return true; } // S
+         if(k==84){ if(drag.Active()){ int n=drag.TpCount()+1; if(n>MM_MAX_TP_LEVELS) n=1; drag.SetTpCount(n); status.Info("TP","TP targets: "+IntegerToString(n)); } return true; } // T cycle TP count (1..max)
          if(k==80){ if(!posDrag.SelectCurrent(m_sym,0)) posDrag.SelectCurrent("",0); status.Info("POS", posDrag.Active()?"Selected":"No position"); return true; } // P
          if(k==75){ SetTab(m_tab==0?1:0); return true; } // K toggle stats
       }
@@ -313,6 +338,12 @@ public:
 
    bool TrySend(CDragTool &drag, CExecutionRouter &router, MM_RiskContext &ctx, MM_GuardConfig &gcfg, MM_ExecPolicy &policy)
    {
+      if(m_storeBlocked)
+      {
+         status.Warn("BLOCK", "STATE_NOT_OPERATIONAL: explicit resolution required");
+         MessageBox(m_ui.Msg_StateBlocked()+"\n\n"+m_storeBlockedReason, "MoneyManager - "+m_ui.S_Blocked(), MB_OK|MB_ICONSTOP);
+         return false;
+      }
       if(!drag.Active() || !drag.Ready()){ status.Warn("SEND","No active plan"); return false; }
       if(drag.InstabilityWarn())
       {
@@ -327,9 +358,12 @@ public:
          return false;
       }
       if(m_stats!=NULL) m_stats.RegisterPlannedRisk(plan.symbol, chk.risk.riskMoney, m_accMode);
+      string tpSummary = "-";
+      if(plan.tpCount==1) tpSummary = DoubleToString(plan.tpPrice[0],(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS));
+      else if(plan.tpCount>1){ tpSummary = IntegerToString(plan.tpCount)+" TPs"; }
       string summary = (drag.IsBuy()?"BUY ":"SELL ")+DoubleToString(chk.risk.lot,2)+" "+plan.symbol+
                        "\nSL="+DoubleToString(plan.slPrice,(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS))+
-                       " TP="+(plan.tpCount>0?DoubleToString(plan.tpPrice[0],(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS)):"-")+
+                       " TP="+tpSummary+
                        "\n"+m_ui.S_Risk()+"="+DoubleToString(chk.risk.riskPercent,2)+"% ($"+DoubleToString(chk.risk.riskMoney,2)+") RR="+DoubleToString(chk.risk.rr,2)+
                        "\n"+m_ui.S_Confirm();
       int res = MessageBox(summary, "MoneyManager", MB_YESNO|MB_ICONQUESTION);
@@ -345,8 +379,8 @@ public:
    void Destroy()
    {
       banner.Destroy(); badge.Destroy(); preview.Destroy();
-      string objs[30]={N("BG"),N("Title"),N("Lang"),N("Mini"),N("Info1"),N("Info2"),N("Buy"),N("Sell"),N("Drag"),N("Send"),N("Clr"),N("Info3"),N("Info4"),N("Help"),N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll"),N("Log"),N("TabM"),N("TabS"),N("CSV"),N("ProfN"),N("PrEx"),N("PrIm")};
-      for(int i=0;i<30;i++) if(ObjectFind(m_chart,objs[i])>=0) ObjectDelete(m_chart,objs[i]);
+      string objs[32]={N("BG"),N("Title"),N("Lang"),N("Mini"),N("Info1"),N("Info2"),N("Buy"),N("Sell"),N("Drag"),N("Send"),N("Clr"),N("Resolve"),N("Info3"),N("Info4"),N("Help"),N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll"),N("Log"),N("State"),N("TabM"),N("TabS"),N("CSV"),N("ProfN"),N("PrEx"),N("PrIm")};
+      for(int i=0;i<32;i++) if(ObjectFind(m_chart,objs[i])>=0) ObjectDelete(m_chart,objs[i]);
       ChartRedraw(m_chart);
    }
 };

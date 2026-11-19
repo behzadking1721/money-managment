@@ -1,6 +1,7 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                                     DragTool.mqh |
 //|             Chart drag lines for Entry/SL/TP (Phase 4)           |
+//|  Extended: optional Multi-TP planning up to MM_MAX_TP_LEVELS     |
 //+------------------------------------------------------------------+
 #ifndef MM_DRAG_TOOL_MQH
 #define MM_DRAG_TOOL_MQH
@@ -17,11 +18,14 @@ struct MM_DragTemplate
    ENUM_MM_SIZING_MODE sizingMode;
    double riskValue;      // percent or lot depending on mode
    int    slippagePoints;
-   double slDistPrice;    // geometry relative
-   double tp1DistPrice;
-   double tp2DistPrice;
-   double tp3DistPrice;
-   void Reset(){ id="default"; isBuy=true; sizingMode=SIZING_AUTO_RISK; riskValue=1.0; slippagePoints=30; slDistPrice=0; tp1DistPrice=0; tp2DistPrice=0; tp3DistPrice=0; }
+   double slDistPrice;    // geometry relative (entry - sl)
+   double tpDistPrice[MM_MAX_TP_LEVELS]; // (tp - entry), indexed 0..N-1
+   int    tpCount;
+   void Reset()
+   {
+      id="default"; isBuy=true; sizingMode=SIZING_AUTO_RISK; riskValue=1.0; slippagePoints=30; slDistPrice=0; tpCount=1;
+      for(int i=0;i<MM_MAX_TP_LEVELS;i++) tpDistPrice[i]=0;
+   }
 };
 
 class CDragTool
@@ -38,7 +42,8 @@ private:
    double m_riskValue; // % or lot
    int    m_slippage;
    bool   m_rrLock;
-   double m_entry, m_sl, m_tp1, m_tp2, m_tp3;
+   double m_entry, m_sl;
+   double m_tp[MM_MAX_TP_LEVELS];
    int    m_tpCount;
    bool   m_instabilityWarn;
    double m_lastSpread;
@@ -46,6 +51,8 @@ private:
    MM_DragTemplate m_tpl;
 
    string N(const string s){ return m_prefix+s; }
+   string TpName(int i){ return N("TP"+IntegerToString(i+1)); }
+
    void SetHLine(const string name,double price,color clr,int style,int width,bool selectable=true,const string tooltip="")
    {
       if(ObjectFind(m_chart,name)<0) ObjectCreate(m_chart,name,OBJ_HLINE,0,0,price);
@@ -70,25 +77,38 @@ private:
       double pt=SymbolInfoDouble(m_sym,SYMBOL_POINT);
       if(m_entry==0) m_entry = m_isBuy?ask:bid;
       if(m_sl==0) m_sl = m_isBuy? m_entry-200*pt : m_entry+200*pt;
-      if(m_tp1==0) m_tp1 = m_isBuy? m_entry+400*pt : m_entry-400*pt;
-      if(m_tpCount>=2 && m_tp2==0) m_tp2 = m_isBuy? m_entry+600*pt : m_entry-600*pt;
-      if(m_tpCount>=3 && m_tp3==0) m_tp3 = m_isBuy? m_entry+800*pt : m_entry-800*pt;
+      for(int i=0;i<MM_MAX_TP_LEVELS;i++)
+      {
+         if(i < m_tpCount && m_tp[i]==0)
+         {
+            double step = 200.0 * (i+2); // TP1:+400, TP2:+600, ...
+            m_tp[i] = m_isBuy? m_entry + step*pt : m_entry - step*pt;
+         }
+      }
       string dir = m_isBuy?"BUY":"SELL";
-      SetHLine(N("Entry"),m_entry, m_isBuy?clrDodgerBlue:clrTomato, STYLE_SOLID, 2, true, dir+" Entry / ورود");
-      SetHLine(N("SL"),   m_sl,    clrRed,    STYLE_SOLID, 2, true, "Stop Loss / حد ضرر");
-      SetHLine(N("TP1"),  m_tp1,   clrLimeGreen, STYLE_DASH, 1, true, "Take Profit 1 / حد سود 1");
-      if(m_tpCount>=2) SetHLine(N("TP2"),m_tp2,clrGreen,STYLE_DOT,1,true,"Take Profit 2 / حد سود 2"); else if(ObjectFind(m_chart,N("TP2"))>=0) ObjectDelete(m_chart,N("TP2"));
-      if(m_tpCount>=3) SetHLine(N("TP3"),m_tp3,clrGreen,STYLE_DOT,1,true,"Take Profit 3 / حد سود 3"); else if(ObjectFind(m_chart,N("TP3"))>=0) ObjectDelete(m_chart,N("TP3"));
+      SetHLine(N("Entry"),m_entry, m_isBuy?clrDodgerBlue:clrTomato, STYLE_SOLID, 2, true, dir+" Entry");
+      SetHLine(N("SL"),   m_sl,    clrRed,    STYLE_SOLID, 2, true, "Stop Loss");
+      for(int i=0;i<MM_MAX_TP_LEVELS;i++)
+      {
+         string nm=TpName(i);
+         if(i < m_tpCount)
+         {
+            color clr = (i==0)?clrLimeGreen:clrGreen;
+            int style = (i==0)?STYLE_DASH:STYLE_DOT;
+            SetHLine(nm, m_tp[i], clr, style, 1, true, "Take Profit "+IntegerToString(i+1));
+         }
+         else if(ObjectFind(m_chart,nm)>=0) ObjectDelete(m_chart,nm);
+      }
    }
 
 public:
-   CDragTool(){ m_chart=0; m_prefix="MM_D_"; m_sym=_Symbol; m_active=false; m_ready=false; m_isBuy=true; m_mode=MM_DRAG_AUTO; m_sizingMode=SIZING_AUTO_RISK; m_riskValue=1.0; m_slippage=30; m_rrLock=false; m_entry=0; m_sl=0; m_tp1=0; m_tp2=0; m_tp3=0; m_tpCount=1; m_instabilityWarn=false; m_lastSpread=0; m_lastPriceTs=0; m_tpl.Reset(); }
+   CDragTool(){ m_chart=0; m_prefix="MM_D_"; m_sym=_Symbol; m_active=false; m_ready=false; m_isBuy=true; m_mode=MM_DRAG_AUTO; m_sizingMode=SIZING_AUTO_RISK; m_riskValue=1.0; m_slippage=30; m_rrLock=false; m_entry=0; m_sl=0; m_tpCount=1; m_instabilityWarn=false; m_lastSpread=0; m_lastPriceTs=0; m_tpl.Reset(); for(int i=0;i<MM_MAX_TP_LEVELS;i++) m_tp[i]=0; }
 
    void Init(long chart,const string symbol,const string prefix="MM_D_"){ m_chart=chart; m_sym=symbol; m_prefix=prefix; }
    bool Active(){ return m_active; }
    bool Ready(){ return m_active && m_ready; }
    bool IsBuy(){ return m_isBuy; }
-   void SetBuy(bool buy){ m_isBuy=buy; if(m_active){ SyncFromLines(); m_entry=0; m_sl=0; m_tp1=0; m_tp2=0; m_tp3=0; EnsureLines(); } }
+   void SetBuy(bool buy){ m_isBuy=buy; if(m_active){ SyncFromLines(); m_entry=0; m_sl=0; for(int i=0;i<MM_MAX_TP_LEVELS;i++) m_tp[i]=0; EnsureLines(); } }
    void Reverse(){ SetBuy(!m_isBuy); }
    void SetMode(ENUM_MM_DRAG_ORDER_MODE m){ m_mode=m; }
    ENUM_MM_DRAG_ORDER_MODE Mode(){ return m_mode; }
@@ -99,22 +119,27 @@ public:
    void AdjustRisk(double deltaPct){ m_riskValue=MathMax(0.01, m_riskValue+deltaPct); }
    void SetSlippage(int pts){ m_slippage=pts; }
    int Slippage(){ return m_slippage; }
-   void SetTpCount(int n){ m_tpCount=MathMax(1,MathMin(3,n)); if(m_active) EnsureLines(); }
+   void SetTpCount(int n)
+   {
+      m_tpCount=MathMax(1,MathMin(MM_MAX_TP_LEVELS,n));
+      if(m_active) EnsureLines();
+   }
    int TpCount(){ return m_tpCount; }
    bool InstabilityWarn(){ return m_instabilityWarn; }
 
    void Activate(bool buy=true)
    {
-      m_active=true; m_ready=true; m_isBuy=buy; m_entry=0; m_sl=0; m_tp1=0; m_tp2=0; m_tp3=0; m_instabilityWarn=false;
+      m_active=true; m_ready=true; m_isBuy=buy; m_entry=0; m_sl=0; for(int i=0;i<MM_MAX_TP_LEVELS;i++) m_tp[i]=0; m_instabilityWarn=false;
       EnsureLines(); ChartRedraw(m_chart);
    }
    void Deactivate(){ m_active=false; m_ready=false; Destroy(); }
-   void Clear(){ m_entry=0; m_sl=0; m_tp1=0; m_tp2=0; m_tp3=0; m_instabilityWarn=false; if(m_active){ EnsureLines(); } }
+   void Clear(){ m_entry=0; m_sl=0; for(int i=0;i<MM_MAX_TP_LEVELS;i++) m_tp[i]=0; m_instabilityWarn=false; if(m_active){ EnsureLines(); } }
 
    void Destroy()
    {
-      string names[5]={N("Entry"),N("SL"),N("TP1"),N("TP2"),N("TP3")};
-      for(int i=0;i<5;i++) if(ObjectFind(m_chart,names[i])>=0) ObjectDelete(m_chart,names[i]);
+      if(ObjectFind(m_chart,N("Entry"))>=0) ObjectDelete(m_chart,N("Entry"));
+      if(ObjectFind(m_chart,N("SL"))>=0) ObjectDelete(m_chart,N("SL"));
+      for(int i=0;i<MM_MAX_TP_LEVELS;i++){ string nm=TpName(i); if(ObjectFind(m_chart,nm)>=0) ObjectDelete(m_chart,nm); }
       ChartRedraw(m_chart);
    }
 
@@ -123,9 +148,7 @@ public:
       if(!m_active) return;
       m_entry=GetHLine(N("Entry"),m_entry);
       m_sl=GetHLine(N("SL"),m_sl);
-      m_tp1=GetHLine(N("TP1"),m_tp1);
-      if(m_tpCount>=2) m_tp2=GetHLine(N("TP2"),m_tp2);
-      if(m_tpCount>=3) m_tp3=GetHLine(N("TP3"),m_tp3);
+      for(int i=0;i<m_tpCount;i++) m_tp[i]=GetHLine(TpName(i),m_tp[i]);
    }
 
    // Detect market vs pending and resolve order type
@@ -149,10 +172,6 @@ public:
             if(m_entry > ask + tol){ isPending=true; otype=ORDER_TYPE_SELL_LIMIT; }
             else if(m_entry < bid - tol){ isPending=true; otype=ORDER_TYPE_SELL_STOP; }
             else { isPending=false; otype=ORDER_TYPE_SELL; }
-         }
-         if(m_mode==MM_DRAG_PENDING && !isPending)
-         {
-            // force pending by nudging interpretation: keep detected as market-zone but caller may warn
          }
       }
    }
@@ -199,8 +218,9 @@ public:
       plan.symbol=m_sym; plan.side=m_isBuy?POSITION_TYPE_BUY:POSITION_TYPE_SELL;
       plan.isPending=pending; plan.orderType=ot;
       plan.entryPrice=m_entry; plan.slPrice=m_sl;
-      plan.tpCount=m_tpCount;
-      plan.tpPrice[0]=m_tp1; plan.tpPrice[1]=m_tp2; plan.tpPrice[2]=m_tp3;
+      plan.tpCount = MathMax(1, MathMin(MM_MAX_TP_LEVELS, m_tpCount));
+      for(int i=0;i<MM_MAX_TP_LEVELS;i++) plan.tpPrice[i]=0;
+      for(int i=0;i<plan.tpCount;i++) plan.tpPrice[i]=m_tp[i];
       plan.sizingMode=m_sizingMode;
       if(m_sizingMode==SIZING_MANUAL_LOT) plan.lot=m_riskValue; else plan.riskValue=m_riskValue;
       plan.slippagePoints=m_slippage;
@@ -209,25 +229,29 @@ public:
       return true;
    }
 
-   // Template helpers (geometry + risk/mode/slippage) per frozen spec
+   // Template helpers (geometry + risk/mode/slippage)
    MM_DragTemplate CaptureTemplate(const string id)
    {
       MM_DragTemplate t; t.Reset(); t.id=id; t.isBuy=m_isBuy; t.sizingMode=m_sizingMode; t.riskValue=m_riskValue; t.slippagePoints=m_slippage;
       double e=m_entry;
       t.slDistPrice = e-m_sl; // signed relative
-      t.tp1DistPrice = m_tp1-e; t.tp2DistPrice=m_tp2-e; t.tp3DistPrice=m_tp3-e;
+      t.tpCount = m_tpCount;
+      for(int i=0;i<MM_MAX_TP_LEVELS;i++) t.tpDistPrice[i] = (i<m_tpCount)?(m_tp[i]-e):0.0;
       return t;
    }
    void ApplyTemplate(const MM_DragTemplate &t, double entryPrice)
    {
       m_isBuy=t.isBuy; m_sizingMode=t.sizingMode; m_riskValue=t.riskValue; m_slippage=t.slippagePoints;
       m_entry=entryPrice; m_sl = m_entry - t.slDistPrice;
-      m_tp1 = m_entry + t.tp1DistPrice; m_tp2 = m_entry + t.tp2DistPrice; m_tp3 = m_entry + t.tp3DistPrice;
+      m_tpCount = MathMax(1, MathMin(MM_MAX_TP_LEVELS, t.tpCount>0?t.tpCount:1));
+      for(int i=0;i<MM_MAX_TP_LEVELS;i++) m_tp[i] = (i<m_tpCount && t.tpDistPrice[i]!=0.0) ? (m_entry + t.tpDistPrice[i]) : 0.0;
       if(m_active) EnsureLines();
    }
 
-   double Entry(){ return m_entry; } double SL(){ return m_sl; } double TP1(){ return m_tp1; }
-   double TP2(){ return m_tp2; } double TP3(){ return m_tp3; }
+   double Entry(){ return m_entry; } double SL(){ return m_sl; }
+   double TP(int i){ return (i>=0 && i<MM_MAX_TP_LEVELS)?m_tp[i]:0.0; }
+   double TP1(){ return m_tp[0]; } double TP2(){ return m_tp[1]; } double TP3(){ return m_tp[2]; }
+   double TP4(){ return m_tp[3]; } double TP5(){ return m_tp[4]; }
 };
 
 #endif // MM_DRAG_TOOL_MQH

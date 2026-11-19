@@ -83,6 +83,18 @@ public:
       if(inPlan.symbol==""){ Reject(inPlan.symbol,"INVALID_SYMBOL","Empty symbol",0,"preflight",out); return false; }
       if(m_store!=NULL && !m_store.IsOperational())
       { Reject(inPlan.symbol,"STATE_NOT_OPERATIONAL","State store non-operational; trading blocked",0,"preflight",out); return false; }
+
+      // Multi-TP (optional, off by default): explicit broker/account constraints before send.
+      if(inPlan.tpCount > 1)
+      {
+         if(inPlan.tpCount > MM_MAX_TP_LEVELS)
+         { Reject(inPlan.symbol,"MULTI_TP_LIMIT","Too many take-profit targets",0,"preflight",out); return false; }
+         long marginMode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
+         bool isHedging = (marginMode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
+         if(!isHedging)
+         { Reject(inPlan.symbol,"MULTI_TP_UNSUPPORTED","Multi-TP split execution requires hedging account (netting unsupported)",0,"preflight",out); return false; }
+      }
+
       MM_TradePlan plan=inPlan; plan.slippagePoints=policy.maxSlippagePoints;
       m_risk.Calculate(plan, ctx, out.risk);
       plan.lot = out.risk.lot;

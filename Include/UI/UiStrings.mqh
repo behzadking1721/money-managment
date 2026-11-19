@@ -71,6 +71,8 @@ public:
    string S_Trail(){ return T("Trl","تریل"); }
    string S_BE(){ return T("BE","سر‌به‌سر"); }
    string S_Partial(){ return T("50%","۵۰٪"); }
+   string S_Resolve(){ return T("Resolve","رفع"); }
+   string S_StateBlocked(){ return T("State blocked: explicit resolution required","وضعیت مسدود: نیاز به رفع صریح"); }
 
    // Tooltips
    string Tip_Buy(){ return T("Start BUY drag plan (B)","شروع پلان خرید با درگ (B)"); }
@@ -94,6 +96,15 @@ public:
    string Tip_ProfileNext(){ return T("Switch to next profile","تغییر به پروفایل بعدی"); }
    string Tip_ProfileExport(){ return T("Export active profile","خروجی پروفایل فعال"); }
    string Tip_ProfileImport(){ return T("Import profile from MoneyManager\\profile_import.json","ورود پروفایل از MoneyManager\\profile_import.json"); }
+   string Tip_Resolve(){ return T("Explicitly resolve blocked protective state (requires confirmation)","رفع صریح وضعیت حفاظتی مسدود (نیازمند تایید)"); }
+
+   string Msg_StateBlocked(){ return T("Risk-increasing actions are blocked until explicit resolution. Existing protective state was not auto-reset.","اقدامات افزایش‌دهنده ریسک تا رفع صریح مسدود است. وضعیت حفاظتی قبلی به‌صورت خودکار بازنشانی نشد."); }
+   string Msg_ConfirmNewInit(){ return T(
+      "Initialize NEW protective state from current account metrics now?\n\nThis requires explicit confirmation. Previous continuity-uncertain/protective state evidence is preserved, but protective baselines/counters/DD/lockout history will be replaced by a fresh state from current MT5 values. This cannot prove prior continuity.\n\nChoose Yes only if you intentionally accept this reset for the current context.",
+      "آیا اکنون وضعیت حفاظتی جدید از معیارهای فعلی حساب ایجاد شود؟\n\nاین کار نیازمند تایید صریح است. شواهد وضعیت قبلی حفظ می‌شود، اما مبناها/شمارنده‌ها/تاریخچه افت سرمایه و قفل‌های حفاظتی با وضعیت تازه از مقادیر فعلی MT5 جایگزین می‌شوند. این کار تداوم قبلی را اثبات نمی‌کند.\n\nفقط در صورت پذیرش آگاهانه این بازنشانی تأیید کنید."); }
+   string Msg_InitDone(){ return T("Explicit protective initialization completed.","راه‌اندازی حفاظتی صریح انجام شد."); }
+   string Msg_InitFailed(){ return T("Explicit protective initialization failed; risk-increasing actions remain blocked.","راه‌اندازی حفاظتی صریح ناموفق بود؛ اقدامات افزایش‌دهنده ریسک همچنان مسدود است."); }
+   string Msg_RestoreDenied(){ return T("Restore denied: continuity is not explicitly established.","بازیابی رد شد: تداوم به‌صورت صریح اثبات نشده است."); }
 };
 
 #endif // MM_UI_STRINGS_MQH

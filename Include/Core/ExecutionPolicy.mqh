@@ -123,6 +123,11 @@ public:
    bool ExecuteWithRetry(CTrade &trade, const MM_TradePlan &plan, const MM_ExecPolicy &policy, MqlTradeResult &outRes)
    {
       ZeroMemory(outRes);
+      // Multi-TP execution: split into multiple orders/positions (hedging-safe). If tpCount<=1, behave as before.
+      if(plan.tpCount > 1)
+      {
+         return ExecuteMultiTp(trade, plan, policy, outRes);
+      }
       for(int attempt=0; attempt<=policy.maxRetries; attempt++)
       {
          bool sent=false;
@@ -168,6 +173,160 @@ public:
          }
          return false;
       }
+      return false;
+   }
+
+   // Split totalLot into 'parts' legs aligned to SYMBOL_VOLUME_STEP.
+   // Preserves total exactly on broker step grid (no silent increase/reduction), enforces min/max per leg.
+   // Returns parts on success (vols[0..parts-1] filled), or 0 if invalid/impossible.
+   int SplitVolume(const string symbol, double totalLot, int parts, double &vols[])
+   {
+      if(parts<=0) return 0;
+      ArrayResize(vols, parts);
+      for(int i=0;i<parts;i++) vols[i]=0.0;
+
+      double vmin=SymbolInfoDouble(symbol,SYMBOL_VOLUME_MIN);
+      double vmax=SymbolInfoDouble(symbol,SYMBOL_VOLUME_MAX);
+      double vstep=SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP);
+      if(vstep<=0.0) return 0;
+      if(vmin<=0.0) vmin=vstep;
+      if(vmax < vmin - 1e-12) return 0;
+
+      // integer-step arithmetic for exact preservation/alignment
+      long stepMin = (long)MathCeil(vmin/vstep - 1e-12);
+      long stepMax = (long)MathFloor(vmax/vstep + 1e-12);
+      long stepTotal = (long)MathFloor(totalLot/vstep + 1e-12);
+      if(stepMin < 1) stepMin = 1;
+      if(stepMax < stepMin || stepTotal <= 0) return 0;
+
+      double normTotal = stepTotal * vstep;
+      // reject if requested total is not on step grid (prevents silent reduction/increase)
+      if(MathAbs(totalLot - normTotal) > vstep*1e-6) return 0;
+
+      // feasibility
+      if(stepTotal < stepMin * (long)parts) return 0;
+      if(stepTotal > stepMax * (long)parts) return 0;
+
+      long base = stepTotal / parts;
+      long rem  = stepTotal - base * (long)parts;
+      long legSteps[]; ArrayResize(legSteps, parts);
+      for(int i=0;i<parts;i++) legSteps[i]=base;
+      for(int i=0;i<rem && i<parts;i++) legSteps[i]++;
+
+      // ensure each leg >= stepMin by borrowing (feasible by checks above)
+      for(int i=0;i<parts;i++)
+      {
+         int guard=0;
+         while(legSteps[i] < stepMin && guard < 100000)
+         {
+            int donor=-1;
+            for(int j=0;j<parts;j++) if(j!=i && legSteps[j] > stepMin){ donor=j; break; }
+            if(donor<0) return 0;
+            legSteps[donor]--; legSteps[i]++; guard++;
+         }
+         if(legSteps[i] < stepMin || legSteps[i] > stepMax) return 0;
+      }
+
+      int vdigits = (int)MathCeil(-MathLog10(vstep)); if(vdigits<0) vdigits=0; if(vdigits>8) vdigits=8;
+      long finalSteps=0;
+      for(int i=0;i<parts;i++)
+      {
+         finalSteps += legSteps[i];
+         vols[i] = NormalizeDouble(legSteps[i] * vstep, vdigits);
+         if(vols[i] < vmin - 1e-12 || vols[i] > vmax + 1e-12) return 0;
+         // step alignment guard
+         double q = vols[i] / vstep;
+         if(MathAbs(q - MathRound(q)) > 1e-6) return 0;
+      }
+      if(finalSteps != stepTotal) return 0;
+      double finalSum=0.0; for(int i=0;i<parts;i++) finalSum += vols[i];
+      if(MathAbs(finalSum - normTotal) > vstep*1e-6) return 0;
+      return parts;
+   }
+
+private:
+   bool ExecuteMultiTp(CTrade &trade, const MM_TradePlan &plan, const MM_ExecPolicy &policy, MqlTradeResult &outRes)
+   {
+      ZeroMemory(outRes);
+      // Multi-TP uses split execution (separate positions/orders per TP). On netting accounts market positions merge
+      // and cannot hold multiple TPs; reject explicitly to avoid silent incorrect behavior.
+      long marginMode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
+      bool isHedging = (marginMode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
+      if(!plan.isPending && !isHedging)
+      {
+         outRes.retcode = TRADE_RETCODE_INVALID; outRes.comment = "Multi-TP market unsupported on netting account";
+         g_mmLog.Warn("EXEC_BLOCK","MULTI_TP_NETTING_UNSUPPORTED: market split TP requires hedging account");
+         return false;
+      }
+      if(plan.isPending && !isHedging)
+      {
+         // Pending orders can be placed, but on fill in netting they merge; reject to keep behavior explicit/safe.
+         outRes.retcode = TRADE_RETCODE_INVALID; outRes.comment = "Multi-TP pending unsupported on netting account";
+         g_mmLog.Warn("EXEC_BLOCK","MULTI_TP_NETTING_UNSUPPORTED: pending split TP may merge on fill in netting");
+         return false;
+      }
+
+      int n = plan.tpCount; if(n<2) return false; if(n>MM_MAX_TP_LEVELS) n=MM_MAX_TP_LEVELS;
+      double vols[]; if(SplitVolume(plan.symbol, plan.lot, n, vols) != n)
+      {
+         outRes.retcode = TRADE_RETCODE_INVALID_VOLUME; outRes.comment = "Multi-TP volume split failed";
+         g_mmLog.Warn("EXEC_BLOCK","MULTI_TP_SPLIT_FAIL: invalid/impossible split for "+IntegerToString(n)+" TPs (lot="+DoubleToString(plan.lot,8)+")");
+         return false;
+      }
+
+      bool allOk=true; uint lastRc=TRADE_RETCODE_DONE; string lastReason="DONE"; double sentVol=0.0; ulong lastDeal=0, lastOrder=0;
+      for(int i=0;i<n;i++)
+      {
+         if(vols[i] <= 0.0) continue;
+         bool sent=false; MqlTradeResult partRes; ZeroMemory(partRes);
+         for(int attempt=0; attempt<=policy.maxRetries; attempt++)
+         {
+            if(plan.isPending)
+            {
+               sent = trade.OrderOpen(plan.symbol, plan.orderType, vols[i], 0, plan.entryPrice, plan.slPrice,
+                                      plan.tpPrice[i], ORDER_TIME_GTC, 0, plan.comment);
+            }
+            else
+            {
+               ENUM_ORDER_TYPE ot = (plan.side==POSITION_TYPE_BUY)?ORDER_TYPE_BUY:ORDER_TYPE_SELL;
+               sent = trade.PositionOpen(plan.symbol, ot, vols[i],
+                                         (plan.side==POSITION_TYPE_BUY)?SymbolInfoDouble(plan.symbol,SYMBOL_ASK):SymbolInfoDouble(plan.symbol,SYMBOL_BID),
+                                         plan.slPrice, plan.tpPrice[i], plan.comment);
+            }
+            trade.Result(partRes);
+            uint rc = partRes.retcode;
+            string reason = RetcodeReason(rc);
+            if(IsSuccess(rc))
+            {
+               sentVol += partRes.volume>0?partRes.volume:vols[i];
+               lastDeal = partRes.deal; lastOrder = partRes.order; lastRc=rc; lastReason=reason;
+               g_mmLog.Info("EXEC_OK","MULTI_TP part="+IntegerToString(i+1)+"/"+IntegerToString(n)+" vol="+DoubleToString(vols[i],2)+" tp="+DoubleToString(plan.tpPrice[i],(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS))+" rc="+reason);
+               break;
+            }
+            if(IsTerminalBlock(rc))
+            {
+               g_mmLog.Error("EXEC_BLOCK","MULTI_TP part="+IntegerToString(i+1)+" "+reason+" rc="+(string)rc+" "+partRes.comment);
+               allOk=false; outRes=partRes; lastRc=rc; lastReason=reason; attempt=policy.maxRetries+1; break;
+            }
+            if(IsRetryable(rc))
+            {
+               g_mmLog.Warn("EXEC_RETRY","MULTI_TP part="+IntegerToString(i+1)+" "+reason+" attempt="+(string)(attempt+1));
+               if(attempt < policy.maxRetries) { Sleep(policy.retryDelayMs); continue; }
+            }
+            allOk=false; outRes=partRes; lastRc=rc; lastReason=reason; attempt=policy.maxRetries+1; break;
+         }
+         if(!allOk) break;
+      }
+
+      if(allOk)
+      {
+         outRes.retcode = lastRc; outRes.comment = "MULTI_TP:"+IntegerToString(n)+" parts sent";
+         outRes.volume = sentVol; outRes.deal = lastDeal; outRes.order = lastOrder;
+         g_mmLog.Info("EXEC_OK",plan.symbol+" MULTI_TP complete parts="+IntegerToString(n)+" totalVol="+DoubleToString(sentVol,2));
+         return true;
+      }
+      // Partial failure: do not roll back successful parts automatically (may have filled); report failure for remaining.
+      outRes.comment = StringFormat("MULTI_TP partial failure after vol=%.2f (%s)", sentVol, outRes.comment);
       return false;
    }
 };

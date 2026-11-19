@@ -73,7 +73,14 @@ public:
       string txt = " "+status+"  "+dir+" "+kind+"\n";
       txt += " "+ui.S_Entry()+": "+DoubleToString(plan.entryPrice,(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS))+"\n";
       txt += " "+ui.S_SL()+": "+DoubleToString(plan.slPrice,(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS));
-      txt += "  "+ui.S_TP()+": "+(plan.tpCount>0?DoubleToString(plan.tpPrice[0],(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS)):"-")+"\n";
+      if(plan.tpCount <= 1)
+         txt += "  "+ui.S_TP()+": "+(plan.tpCount>0?DoubleToString(plan.tpPrice[0],(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS)):"-")+"\n";
+      else
+      {
+         txt += "  TP("+IntegerToString(plan.tpCount)+"):";
+         for(int ti=0; ti<plan.tpCount; ti++) txt += " "+DoubleToString(plan.tpPrice[ti],(int)SymbolInfoInteger(plan.symbol,SYMBOL_DIGITS));
+         txt += "\n";
+      }
       txt += " "+ui.S_Lot()+": "+DoubleToString(m_lastRisk.lot,2)+"  "+ui.S_Risk()+": "+DoubleToString(m_lastRisk.riskPercent,2)+"% ($"+DoubleToString(m_lastRisk.riskMoney,2)+")\n";
       txt += " "+ui.S_RR()+": "+DoubleToString(m_lastRisk.rr,2)+"  "+ui.S_Spread()+": "+DoubleToString(sp,1)+"\n";
 
