@@ -224,7 +224,14 @@ public:
             string limCL = (gcfg.maxConsecLoss>0)?(IntegerToString(gcfg.consecLosses)+"/"+IntegerToString(gcfg.maxConsecLoss)):(IntegerToString(gcfg.consecLosses)+"/-");
 
             string l3 = m_ui.S_Trades()+":"+(has?IntegerToString(k.trades):"0")+" "+m_ui.S_WinRate()+":"+DoubleToString(k.winRate,1)+"% "+m_ui.S_PF()+":"+DoubleToString(k.profitFactor,2)+" "+m_ui.S_Net()+":"+DoubleToString(k.netProfit,2);
+            // Phase 8: when prop mode explicitly configured, surface prop DD used/limits (and keep general protection visible).
             string l4 = "DL "+limDL+" WL "+limWL+" ML "+limML+" DD "+limDD;
+            if(gcfg.accountMode==ACCOUNT_PROP && gcfg.propEnabled)
+            {
+               string pDL = (gcfg.propDailyLossLimitPct>0)?(DoubleToString(gcfg.propDailyLossUsedPct,1)+"/"+DoubleToString(gcfg.propDailyLossLimitPct,1)+"%"):"off";
+               string pMD = (gcfg.propMaxTotalDDPct>0)?(DoubleToString(gcfg.propTotalDDUsedPct,1)+"/"+DoubleToString(gcfg.propMaxTotalDDPct,1)+"%"):"off";
+               l4 = "PropDL "+pDL+" PropDD "+pMD+" DL "+limDL+" DD "+limDD;
+            }
             string l5 = "T "+limTr+" CL "+limCL+" CD "+limCD+" ["+ModeLabel()+"/"+prof+"]";
             Lbl(N("Info3"), m_x+8, m_y+88, l3, clrSilver, 9);
             Lbl(N("Info4"), m_x+8, m_y+104, l4, clrKhaki, 9);

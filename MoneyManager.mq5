@@ -204,7 +204,7 @@ void RefreshRiskContext()
 {
    ENUM_MM_ACCOUNT_MODE mode = EffectiveAccountMode();
    bool propMode = PropExplicitEnabled();
-   // Phase 7: Personal/default uses equity/balance basis unless explicitly overridden; prop mode may use AllowedDD.
+   // Phase 7/8: Personal/default uses equity/balance basis unless explicitly overridden; prop mode may use AllowedDD.
    ENUM_MM_RISK_BASIS basis = (propMode && mode==ACCOUNT_PROP) ? MM_BASIS_ALLOWED_DD : MM_BASIS_EQUITY;
    MM_ProfileRecord pr; bool hasProf = g_profiles.GetActive(pr);
    if(hasProf)
@@ -214,7 +214,7 @@ void RefreshRiskContext()
       else if(pr.profile.riskBasis=="Equity") basis = MM_BASIS_EQUITY;
    }
    // Keep prop-firm specific basis inactive for personal mode unless prop is explicitly configured.
-   if(!propMode && basis==MM_BASIS_ALLOWED_DD) basis = MM_BASIS_EQUITY;
+   if(!(propMode && mode==ACCOUNT_PROP) && basis==MM_BASIS_ALLOWED_DD) basis = MM_BASIS_EQUITY;
 
    double bal=AccountInfoDouble(ACCOUNT_BALANCE);
    double eq =AccountInfoDouble(ACCOUNT_EQUITY);
@@ -230,8 +230,9 @@ void RefreshRiskContext()
    double dLim = EffDailyLossLimit();
    double mLim = EffMaxDrawdown();
 
-   if(propMode && g_prop.IsEnabled())
+   if(propMode && g_prop.IsEnabled() && mode==ACCOUNT_PROP)
    {
+      g_prop.SyncBaseline(g_prot.StartBalance(), g_prot.PeakEquity(), g_prot.PeakBalance());
       SPropFirmRules r=g_prop.GetRules();
       remDaily = g_prop.RemainingDailyDDMoney(dailyLossMoney, dayStartBal, dayStartEq);
       remMax   = g_prop.RemainingMaxDDMoney(eq, g_prot.PeakEquity(), g_prot.StartBalance());
@@ -291,22 +292,28 @@ void RefreshGuardConfig()
    g_guardCfg.consecLosses = g_prot.ConsecutiveLosses();
    g_guardCfg.inCooldown = !g_prot.CheckCooldown();
 
-   // Phase 7: prop constraints are not implicitly enforced in Personal mode/default.
+   // Phase 7/8: prop constraints are not implicitly enforced in Personal mode/default.
    g_guardCfg.propEnabled = propExplicit;
    if(g_guardCfg.propEnabled && g_prop.IsEnabled() && mode==ACCOUNT_PROP)
    {
+      // keep baselines/peaks aligned to configured DD references for accurate used/remaining reporting
+      g_prop.SyncBaseline(g_prot.StartBalance(), g_prot.PeakEquity(), g_prot.PeakBalance());
       SPropFirmRules r=g_prop.GetRules();
       g_guardCfg.propDailyLossLimitPct = r.maxDailyLoss;
       g_guardCfg.propMaxTotalDDPct = r.maxTotalDD;
       g_guardCfg.propDailyLossUsedPct = g_prop.DailyLossUsedPct(g_prot.DailyLoss(), dayStartBal, dayStartEq);
       g_guardCfg.propTotalDDUsedPct = g_prop.TotalDDUsedPct(AccountInfoDouble(ACCOUNT_EQUITY), g_prot.PeakEquity(), g_prot.StartBalance());
       g_guardCfg.propMaxPositionSizePct = r.maxPositionSize;
-      g_guardCfg.propConsistencyEnabled = (r.consistencyPercent>0);
+      // Consistency/min-trading-days require persisted multi-day history; not persisted -> do not enforce falsely.
+      g_guardCfg.propConsistencyEnabled = (r.consistencyPercent>0 && g_prop.ConsistencyEnforcementReliable());
       g_guardCfg.propConsistencyPct = r.consistencyPercent;
       double todayProfitPct = (dayStartBal>0)?(g_prot.DailyProfit()/dayStartBal*100.0):0.0;
       g_guardCfg.propTodayProfitPct = todayProfitPct;
       g_guardCfg.propWeekendClose = r.weekendClose;
-      g_guardCfg.propMaxTradesPerDay = EffMaxTradesPerDay();
+      g_guardCfg.propMaxTradesPerDay = (r.maxDailyLoss>=0 ? EffMaxTradesPerDay() : EffMaxTradesPerDay()); // trades cap driven by configured effective limit
+      if(EffMaxTradesPerDay()>0) g_guardCfg.propMaxTradesPerDay = EffMaxTradesPerDay();
+      // best-effort runtime snapshot only (unverified across restart)
+      g_prop.RecordDaySnapshot(srv, g_prot.DailyProfit(), g_prot.TradesToday()>0);
    }
 
    bool newsEnabled = EffNewsEnabled();

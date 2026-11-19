@@ -22,6 +22,9 @@ All notable changes to this project are documented here (phase-based).
 - **Phase 6 (Multi-TP):** Implemented and compiled (0 errors, 0 warnings). Optional Multi-TP planning/validation/UI (up to 5) with hedging-only split execution and explicit netting pre-send rejection; single-TP path preserved. Demo integration runtime **pending** (no runtime PASS claimed).
 - **Phase 7 (Personal Account Configuration, in progress):** Hardened effective mode/profile handling so prop-firm engine/rules/guard context are inactive unless explicitly configured; personal risk-basis fallback kept non-prop; UI/stats surfaces transparent personal protection/limit diagnostics (DL/WL/ML/DD/trades/cooldown/consec + active mode/profile). Added focused test `Tests/Phase7/PersonalAccount_Config_Test.mq5`. Compiles clean (0 errors, 0 warnings); runtime MT5 script/demo verification **not run**.
 
+### Phase 8 progress (2026-11-19)
+- **Phase 8 (Optional Prop Firm Configuration, in progress):** Preset/rule mapping and DD used/remaining aligned to configured references (equity/balance) with baseline/peak sync in runtime context; prop rules remain explicit/optional and inactive in personal mode; unsupported/unverified rules (consistency/min-trading-days runtime-only history not persisted) are not falsely enforced and marked as unverified; UI stats surfaces prop DD used/limits when prop explicitly active. Added focused test `Tests/Phase8/PropFirm_Config_Test.mq5`. Compiles clean (0 errors, 0 warnings); runtime MT5 script/demo verification **not run**.
+
 ## [v0.7.0-phase7] - 2026-11-18 (Phase 7: Hardening)
 
 ### Added
