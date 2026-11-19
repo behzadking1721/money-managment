@@ -212,11 +212,20 @@ public:
             MM_Kpi k; k.Reset();
             bool has=false;
             if(m_stats!=NULL){ m_stats.GetKpiForMode(m_accMode, k); if(k.trades==0) m_stats.GetKpi(k); has=true; }
-            string l3 = m_ui.S_Trades()+":"+(has?IntegerToString(k.trades):"0")+" "+m_ui.S_WinRate()+":"+DoubleToString(k.winRate,1)+"% "+m_ui.S_PF()+":"+DoubleToString(k.profitFactor,2);
-            string l4 = m_ui.S_Exp()+":"+DoubleToString(k.expectancy,2)+" "+m_ui.S_AvgR()+":"+DoubleToString(k.avgR,2)+" "+m_ui.S_MaxDD()+":"+DoubleToString(k.maxDrawdown,2);
             string prof = "-";
             if(m_profiles!=NULL){ MM_ProfileRecord pr; if(m_profiles.GetActive(pr)) prof=pr.profile.name; }
-            string l5 = m_ui.S_Net()+":"+DoubleToString(k.netProfit,2)+" "+m_ui.S_Dur()+":"+DoubleToString(k.avgDurationMin,1)+"m ["+ModeLabel()+"/"+prof+"]";
+            // Phase 7: transparent, diagnosable personal/protection settings + baseline/peak context (server-time periods).
+            string limDL = (gcfg.dailyLossLimitPct>0)?(DoubleToString(gcfg.dailyLossPct,1)+"/"+DoubleToString(gcfg.dailyLossLimitPct,1)+"%"):"off";
+            string limWL = (gcfg.weeklyLossLimitPct>0)?(DoubleToString(gcfg.weeklyLossPct,1)+"/"+DoubleToString(gcfg.weeklyLossLimitPct,1)+"%"):"off";
+            string limML = (gcfg.monthlyLossLimitPct>0)?(DoubleToString(gcfg.monthlyLossPct,1)+"/"+DoubleToString(gcfg.monthlyLossLimitPct,1)+"%"):"off";
+            string limDD = (gcfg.maxDrawdownPct>0)?(DoubleToString(gcfg.currentDrawdownPct,1)+"/"+DoubleToString(gcfg.maxDrawdownPct,1)+"%"):"off";
+            string limTr = (gcfg.maxTradesPerDay>0)?(IntegerToString(gcfg.tradesToday)+"/"+IntegerToString(gcfg.maxTradesPerDay)):(IntegerToString(gcfg.tradesToday)+"/-");
+            string limCD = gcfg.inCooldown ? "ON" : "off";
+            string limCL = (gcfg.maxConsecLoss>0)?(IntegerToString(gcfg.consecLosses)+"/"+IntegerToString(gcfg.maxConsecLoss)):(IntegerToString(gcfg.consecLosses)+"/-");
+
+            string l3 = m_ui.S_Trades()+":"+(has?IntegerToString(k.trades):"0")+" "+m_ui.S_WinRate()+":"+DoubleToString(k.winRate,1)+"% "+m_ui.S_PF()+":"+DoubleToString(k.profitFactor,2)+" "+m_ui.S_Net()+":"+DoubleToString(k.netProfit,2);
+            string l4 = "DL "+limDL+" WL "+limWL+" ML "+limML+" DD "+limDD;
+            string l5 = "T "+limTr+" CL "+limCL+" CD "+limCD+" ["+ModeLabel()+"/"+prof+"]";
             Lbl(N("Info3"), m_x+8, m_y+88, l3, clrSilver, 9);
             Lbl(N("Info4"), m_x+8, m_y+104, l4, clrKhaki, 9);
             Lbl(N("Help"),  m_x+8, m_y+120, l5, clrLightGray, 8);
@@ -231,7 +240,10 @@ public:
             string rs2 = drag.Active()? (m_ui.S_Lot()+"="+DoubleToString(rr.lot,2)+" "+m_ui.S_Risk()+"="+DoubleToString(rr.riskPercent,2)+"% "+m_ui.S_RR()+"="+DoubleToString(rr.rr,2)) : "";
             color c = (!rr.valid || rr.blocked || preview.LastGuards().hasBlock)?clrTomato:(preview.LastGuards().hasWarn?clrKhaki:clrLightGreen);
             Lbl(N("Info4"), m_x+8, m_y+104, rs2, c, 9);
-            Lbl(N("Help"),  m_x+8, m_y+120, m_ui.S_Help(), clrGray, 8);
+            // Phase 7: quick protection transparency even on main tab when idle.
+            string prof = "-"; if(m_profiles!=NULL){ MM_ProfileRecord pr; if(m_profiles.GetActive(pr)) prof=pr.profile.name; }
+            string lim = drag.Active()? m_ui.S_Help() : ("DL "+DoubleToString(gcfg.dailyLossPct,1)+"/"+(gcfg.dailyLossLimitPct>0?DoubleToString(gcfg.dailyLossLimitPct,1):"-")+" DD "+DoubleToString(gcfg.currentDrawdownPct,1)+"/"+(gcfg.maxDrawdownPct>0?DoubleToString(gcfg.maxDrawdownPct,1):"-")+" ["+ModeLabel()+"/"+prof+"]");
+            Lbl(N("Help"),  m_x+8, m_y+120, lim, drag.Active()?clrGray:clrLightGray, 8);
             Lbl(N("Log"),   m_x+8, m_y+188, status.LastLine(), clrLightGray, 8);
          }
          string st = m_storeBlocked ? (m_ui.S_StateBlocked()+": "+m_storeBlockedReason) : "";

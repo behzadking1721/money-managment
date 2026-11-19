@@ -179,6 +179,9 @@ void FinalizeCompletedLifecycle(int idx, datetime evTime)
    g_mmLog.Info("TRADE_COMPLETED","pos="+(string)g_posTrack[idx].positionId+" net="+DoubleToString(net,2)+" dailyLoss="+DoubleToString(g_prot.DailyLoss(),2)+" consecLosses="+(string)g_prot.ConsecutiveLosses()+" tradesToday="+(string)g_prot.TradesToday());
 }
 
+bool PropExplicitEnabled(){ return (InpPropFirmEnabled || InpAccountMode==ACCOUNT_PROP); }
+ENUM_MM_ACCOUNT_MODE EffectiveAccountMode(){ return InpAccountMode; }
+
 double EffDailyLossLimit(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.dailyLossLimitPct; return InpDailyLossLimit; }
 double EffDailyProfitLimit(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.dailyProfitLimitPct; return InpDailyProfitLimit; }
 double EffWeeklyLossLimit(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.weeklyLossLimitPct; return InpWeeklyLossLimit; }
@@ -199,9 +202,10 @@ bool StoreReadyForRiskIncreasing()
 
 void RefreshRiskContext()
 {
-   ENUM_MM_ACCOUNT_MODE mode = InpAccountMode;
-   bool propMode = (InpPropFirmEnabled || mode==ACCOUNT_PROP);
-   ENUM_MM_RISK_BASIS basis = propMode ? MM_BASIS_ALLOWED_DD : MM_BASIS_EQUITY;
+   ENUM_MM_ACCOUNT_MODE mode = EffectiveAccountMode();
+   bool propMode = PropExplicitEnabled();
+   // Phase 7: Personal/default uses equity/balance basis unless explicitly overridden; prop mode may use AllowedDD.
+   ENUM_MM_RISK_BASIS basis = (propMode && mode==ACCOUNT_PROP) ? MM_BASIS_ALLOWED_DD : MM_BASIS_EQUITY;
    MM_ProfileRecord pr; bool hasProf = g_profiles.GetActive(pr);
    if(hasProf)
    {
@@ -209,6 +213,8 @@ void RefreshRiskContext()
       else if(pr.profile.riskBasis=="Balance") basis = MM_BASIS_BALANCE_DAY;
       else if(pr.profile.riskBasis=="Equity") basis = MM_BASIS_EQUITY;
    }
+   // Keep prop-firm specific basis inactive for personal mode unless prop is explicitly configured.
+   if(!propMode && basis==MM_BASIS_ALLOWED_DD) basis = MM_BASIS_EQUITY;
 
    double bal=AccountInfoDouble(ACCOUNT_BALANCE);
    double eq =AccountInfoDouble(ACCOUNT_EQUITY);
@@ -257,7 +263,10 @@ void RefreshGuardConfig()
    g_prot.SyncPeriods(srv);
    g_prot.UpdateCooldown(srv);
 
-   g_guardCfg.accountMode = InpAccountMode;
+   ENUM_MM_ACCOUNT_MODE mode = EffectiveAccountMode();
+   bool propExplicit = PropExplicitEnabled();
+
+   g_guardCfg.accountMode = mode;
    g_guardCfg.protectionEnabled = true;
    g_guardCfg.dailyLossLimitPct = EffDailyLossLimit();
    g_guardCfg.dailyProfitLimitPct = EffDailyProfitLimit();
@@ -282,8 +291,9 @@ void RefreshGuardConfig()
    g_guardCfg.consecLosses = g_prot.ConsecutiveLosses();
    g_guardCfg.inCooldown = !g_prot.CheckCooldown();
 
-   g_guardCfg.propEnabled = (InpPropFirmEnabled || InpAccountMode==ACCOUNT_PROP);
-   if(g_guardCfg.propEnabled && g_prop.IsEnabled())
+   // Phase 7: prop constraints are not implicitly enforced in Personal mode/default.
+   g_guardCfg.propEnabled = propExplicit;
+   if(g_guardCfg.propEnabled && g_prop.IsEnabled() && mode==ACCOUNT_PROP)
    {
       SPropFirmRules r=g_prop.GetRules();
       g_guardCfg.propDailyLossLimitPct = r.maxDailyLoss;
@@ -353,7 +363,8 @@ void UpdateStoreStatusUi()
 
 void SyncPropBaselineFromRuntime()
 {
-   if(InpPropFirmEnabled)
+   // Phase 7: keep prop engine/rules inactive unless prop is explicitly configured.
+   if(PropExplicitEnabled())
    {
       SPropFirmRules r; g_prop.Init(); g_prop.LoadPreset(InpPropPreset,r); r.mode=InpPropMode; g_prop.Enable(r);
       g_prop.SyncBaseline(g_prot.StartBalance(), g_prot.PeakEquity());
@@ -499,12 +510,13 @@ int OnInit()
    {
       g_mmLog.Info("STATE_READY","Store operational");
    }
+   g_ui.SetAccountMode(EffectiveAccountMode());
    UpdateStoreStatusUi();
 
    g_lastConnected = (bool)TerminalInfoInteger(TERMINAL_CONNECTED);
    g_lastNewsBlackout=false;
    EventSetTimer(1);
-   g_mmLog.Info("INIT_OK","Money Manager Phase7 initialized magic="+(string)InpMagic);
+   g_mmLog.Info("INIT_OK","Money Manager Phase7 initialized mode="+(string)EffectiveAccountMode()+" propExplicit="+(string)PropExplicitEnabled()+" magic="+(string)InpMagic);
    Print("Money Manager EA Phase7 initialized. Risk-increasing actions: " + (StoreReadyForRiskIncreasing()?"READY":"BLOCKED (explicit resolution required)"));
    return(INIT_SUCCEEDED);
 }
@@ -579,7 +591,7 @@ void OnTick()
    g_posDrag.OnTick();
    RefreshRiskContext();
    RefreshGuardConfig();
-   g_ui.SetAccountMode(InpAccountMode);
+   g_ui.SetAccountMode(EffectiveAccountMode());
    UpdateStoreStatusUi();
    g_ui.Update(g_session, g_news, g_drag, g_risk, g_stops, g_guards, g_riskCtx, g_guardCfg);
 }
@@ -593,6 +605,7 @@ void OnTimer()
    CheckConnectionAlert();
    RefreshRiskContext();
    RefreshGuardConfig();
+   g_ui.SetAccountMode(EffectiveAccountMode());
    UpdateStoreStatusUi();
 }
 
