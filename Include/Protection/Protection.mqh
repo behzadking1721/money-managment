@@ -41,6 +41,7 @@ private:
 
    ulong    m_countedExposureOrders[256];
    int      m_countedExposureCount;
+   int      m_countedExposureHead;
 
    SPropFirmRules m_rules; bool m_hasRules;
 
@@ -80,6 +81,7 @@ private:
       m_dailyProfit=0; m_dailyLoss=0;
       m_tradesToday=0;
       m_countedExposureCount=0;
+      m_countedExposureHead=0;
       m_dayStart=srv;
       m_dayKey=DayKey(srv);
       SyncPeaksInternal();
@@ -117,7 +119,7 @@ public:
       m_dayStart=srv;
       m_dayKey=DayKey(srv); m_weekKey=WeekKeyMonday(srv); m_monthKey=MonthKey(srv);
       m_tradesToday=0; m_consecutiveLosses=0; m_consecutiveWins=0; m_cooldownUntil=0;
-      m_countedExposureCount=0; m_hasRules=false;
+      m_countedExposureCount=0; m_countedExposureHead=0; m_hasRules=false;
    }
 
    // Server-time period sync. Call on tick/timer with TimeTradeServer() (or 0 to resolve).
@@ -168,13 +170,18 @@ public:
    {
       ulong key = (orderTicket!=0)?orderTicket:dealTicket;
       if(key==0) return false;
-      for(int i=0;i<m_countedExposureCount;i++) if(m_countedExposureOrders[i]==key) return false;
-      if(m_countedExposureCount < 256) m_countedExposureOrders[m_countedExposureCount++]=key;
+      if(IsExposureOrderCounted(orderTicket, dealTicket)) return false;
+      if(m_countedExposureCount < 256)
+      {
+         int idx = (m_countedExposureHead + m_countedExposureCount) % 256;
+         m_countedExposureOrders[idx]=key;
+         m_countedExposureCount++;
+      }
       else
       {
-         // ring fallback: keep recent keys, still count exposure
-         m_countedExposureOrders[m_countedExposureCount % 256]=key;
-         m_countedExposureCount = 256 + ((m_countedExposureCount - 256 + 1) % 256);
+         // ring fallback: overwrite oldest, keep recent keys; still count exposure
+         m_countedExposureOrders[m_countedExposureHead]=key;
+         m_countedExposureHead = (m_countedExposureHead + 1) % 256;
       }
       m_tradesToday++;
       return true;
@@ -184,8 +191,11 @@ public:
    {
       ulong key = (orderTicket!=0)?orderTicket:dealTicket;
       if(key==0) return false;
-      int n = m_countedExposureCount>256?256:m_countedExposureCount;
-      for(int i=0;i<n;i++) if(m_countedExposureOrders[i]==key) return true;
+      for(int i=0;i<m_countedExposureCount;i++)
+      {
+         int idx = (m_countedExposureHead + i) % 256;
+         if(m_countedExposureOrders[idx]==key) return true;
+      }
       return false;
    }
 
@@ -340,14 +350,16 @@ public:
    bool CheckConsecutiveLoss(int maxConsecLoss,int cooldownMinutes)
    {
       datetime now=EffectiveServerTime(0);
-      UpdateCooldown(now);
+      UpdateCooldown(now); // expire cooldown and reset streak for a fresh window when due
       if(maxConsecLoss>0 && m_consecutiveLosses>=maxConsecLoss){
          if(cooldownMinutes>0)
          {
             if(m_cooldownUntil==0) m_cooldownUntil=now+cooldownMinutes*60;
             if(now < m_cooldownUntil) return false;
+            // cooldown elapsed in this call window
             m_cooldownUntil=0; m_consecutiveLosses=0; return true;
          }
+         // no cooldown configured: remain blocked by streak until a winning/completed outcome policy resets it elsewhere
          return false;
       }
       return true;
@@ -355,6 +367,7 @@ public:
    bool CheckCooldown()
    {
       datetime now=EffectiveServerTime(0);
+      UpdateCooldown(now);
       if(m_cooldownUntil>0 && now < m_cooldownUntil) return false;
       return true;
    }

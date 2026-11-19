@@ -25,6 +25,9 @@ All notable changes to this project are documented here (phase-based).
 ### Phase 8 progress (2026-11-19)
 - **Phase 8 (Optional Prop Firm Configuration, in progress):** Preset/rule mapping and DD used/remaining aligned to configured references (equity/balance) with baseline/peak sync in runtime context; prop rules remain explicit/optional and inactive in personal mode; unsupported/unverified rules (consistency/min-trading-days runtime-only history not persisted) are not falsely enforced and marked as unverified; UI stats surfaces prop DD used/limits when prop explicitly active. Added focused test `Tests/Phase8/PropFirm_Config_Test.mq5`. Compiles clean (0 errors, 0 warnings); runtime MT5 script/demo verification **not run**.
 
+### Phase 9 progress (2026-11-19)
+- **Phase 9 (Risk Guardian and Account Protection, in progress):** Hardened `CProtection` exposure dedupe ring handling (correct ring insert/lookup/head reset on overflow) to preserve recent dedupe/count integrity, and made cooldown/consecutive-loss expiry/reset behavior predictable (`CheckCooldown`/`CheckConsecutiveLoss` consistent with `UpdateCooldown`). Weekly/monthly realized loss accounting, server-time period sync/reset, guard priority/first-block and preview/send consistency, and existing preflight/state-operational gating remain intact (risk-reducing position management unchanged). Added focused test `Tests/Phase9/RiskGuardian_Test.mq5`. Compiles clean (0 errors, 0 warnings); runtime MT5 script/demo verification **not run**.
+
 ## [v0.7.0-phase7] - 2026-11-18 (Phase 7: Hardening)
 
 ### Added
