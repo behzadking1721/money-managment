@@ -164,6 +164,12 @@ Use this checklist for demo/validation. Record evidence (screenshots, logs, Stra
     - Magic filtering
     - Failed trade retcodes handled
 
+## Phase 16 — Automated Position Management (Engine)
+### Build / Scripts
+- [ ] `Tests/Phase16/EngineMath_Test.mq5` passes (profit points/R multiples, BE triggers incl. points/R/ANY/OFF, trail activation + candidate SL fixed/ATR/candle, protective improvement, partial-close volume boundaries/remainder/mask, partial-level trigger, pending-close confirmation, magic/symbol filter, status, OnTick no-op).
+- [ ] `Tests/Phase16/RestartSafety_Test.mq5` passes (history-unavailable/INOUT/not-eligible fail-safe skip of partial stages; BE/trail availability).
+- [ ] `Tests/Phase16/MultiPosition_Test.mq5` passes (hedging/netting lifecycle isolation, no cross-position influence).
+
 ## Final Acceptance
 - [ ] All requested phase code compiled clean (0 errors, 0 warnings).
 - [ ] Critical flows (drag preview → guard preflight → confirm → send/modify/close) verified on demo.

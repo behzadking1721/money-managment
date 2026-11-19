@@ -23,6 +23,7 @@
 #include "../News/NewsManager.mqh"
 
 typedef void (*MM_StoreResolveHandler)();
+typedef void (*MM_PosMgmtToggleHandler)();
 
 class CPanelShell
 {
@@ -41,6 +42,9 @@ private:
    bool m_storeBlocked;
    string m_storeBlockedReason;
    MM_StoreResolveHandler m_storeResolveHandler;
+   MM_PosMgmtToggleHandler m_pmToggleHandler;
+   string m_pmStatus;
+   bool m_pmEnabled;
 
    string N(const string s){ return m_pfx+s; }
    void Rect(const string name,int x,int y,int w,int h,color bg,color border)
@@ -86,7 +90,7 @@ public:
    CPreviewOverlay preview;
    CStatusLog     status;
 
-   CPanelShell(){ m_chart=0; m_sym=_Symbol; m_pfx="MM_UI_"; m_mini=true; m_hidden=false; m_langFA=false; m_dragMode=false; m_tab=0; m_x=10; m_y=50; m_wMini=300; m_hMini=92; m_wDrawer=340; m_hDrawer=250; m_stats=NULL; m_profiles=NULL; m_accMode=ACCOUNT_PERSONAL; m_storeBlocked=false; m_storeBlockedReason=""; m_storeResolveHandler=NULL; }
+   CPanelShell(){ m_chart=0; m_sym=_Symbol; m_pfx="MM_UI_"; m_mini=true; m_hidden=false; m_langFA=false; m_dragMode=false; m_tab=0; m_x=10; m_y=50; m_wMini=300; m_hMini=92; m_wDrawer=340; m_hDrawer=250; m_stats=NULL; m_profiles=NULL; m_accMode=ACCOUNT_PERSONAL; m_storeBlocked=false; m_storeBlockedReason=""; m_storeResolveHandler=NULL; m_pmToggleHandler=NULL; m_pmStatus=""; m_pmEnabled=false; }
 
    void Init(long chart,const string symbol,int x=10,int y=50)
    {
@@ -105,6 +109,8 @@ public:
    void SetProfiles(CProfileManager &p){ m_profiles=GetPointer(p); }
    void SetAccountMode(ENUM_MM_ACCOUNT_MODE m){ m_accMode=m; }
    void SetStoreResolutionHandler(MM_StoreResolveHandler handler){ m_storeResolveHandler=handler; }
+   void SetPosMgmtHandler(MM_PosMgmtToggleHandler handler){ m_pmToggleHandler=handler; }
+    void SetPosMgmtState(bool enabled,const string statusSummary){ m_pmEnabled=enabled; m_pmStatus=statusSummary; }
    void SetStoreBlockedState(bool blocked, const string reason){ m_storeBlocked=blocked; m_storeBlockedReason=reason; }
    bool StoreBlocked(){ return m_storeBlocked; }
    string StoreBlockedReason(){ return m_storeBlockedReason; }
@@ -143,14 +149,16 @@ public:
          Btn(N("Trail"),  m_x+274,m_y+142, 34, 18, m_ui.S_Trail(), clrTeal, clrWhite, m_ui.Tip_Trail());
          Btn(N("PClose"), m_x+8,  m_y+164, 48, 18, m_ui.S_Partial(), clrMaroon, clrWhite, m_ui.Tip_Partial());
          Btn(N("PCAll"),  m_x+60, m_y+164, 56, 18, m_ui.S_CloseAll(), clrMaroon, clrWhite, m_ui.Tip_CloseAll());
+         Btn(N("Auto"),   m_x+122,m_y+164, 72, 18, m_pmEnabled?"AUTO: ON":"AUTO: OFF", m_pmEnabled?clrDarkGreen:clrSlateGray, clrWhite, m_ui.T("Toggle automated position management","تغییر مدیریت خودکار پوزیشن"));
 
          Btn(N("CSV"),   m_x+8,   m_y+142, 44, 18, m_ui.S_CSV(), clrDarkOliveGreen, clrWhite, m_ui.Tip_CSV());
          Btn(N("ProfN"), m_x+56,  m_y+142, 52, 18, m_ui.S_Next(), clrDarkSlateBlue, clrWhite, m_ui.Tip_ProfileNext());
          Btn(N("PrEx"),  m_x+112, m_y+142, 52, 18, m_ui.S_Export(), clrDarkSlateBlue, clrWhite, m_ui.Tip_ProfileExport());
          Btn(N("PrIm"),  m_x+168, m_y+142, 52, 18, m_ui.S_Import(), clrDarkSlateBlue, clrWhite, m_ui.Tip_ProfileImport());
 
-         Lbl(N("Log"), m_x+8, m_y+188, "", clrLightGray, 8);
-         Lbl(N("State"), m_x+8, m_y+204, "", clrTomato, 8);
+         Lbl(N("PM"),    m_x+8, m_y+180, "", clrDeepSkyBlue, 8);
+         Lbl(N("Log"), m_x+8, m_y+192, "", clrLightGray, 8);
+         Lbl(N("State"), m_x+8, m_y+206, "", clrTomato, 8);
       }
       ApplyVisibility();
       ChartRedraw(m_chart);
@@ -163,12 +171,12 @@ public:
       for(int i=0;i<12;i++) ShowObj(base[i],show);
       ShowObj(N("Resolve"), show && m_storeBlocked);
       bool dr = show && !m_mini;
-      string tabsAndInfo[7]={N("TabM"),N("TabS"),N("Info3"),N("Info4"),N("Help"),N("Log"),N("State")};
-      for(int i=0;i<7;i++) ShowObj(tabsAndInfo[i],dr);
+      string tabsAndInfo[8]={N("TabM"),N("TabS"),N("Info3"),N("Info4"),N("Help"),N("PM"),N("Log"),N("State")};
+      for(int i=0;i<8;i++) ShowObj(tabsAndInfo[i],dr);
       bool mainTab = dr && (m_tab==0);
       bool statsTab = dr && (m_tab==1);
-      string mainBtns[9]={N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll")};
-      for(int i=0;i<9;i++) ShowObj(mainBtns[i],mainTab);
+      string mainBtns[10]={N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll"),N("Auto")};
+      for(int i=0;i<10;i++) ShowObj(mainBtns[i],mainTab);
       string statsBtns[4]={N("CSV"),N("ProfN"),N("PrEx"),N("PrIm")};
       for(int i=0;i<4;i++) ShowObj(statsBtns[i],statsTab);
    }
@@ -242,7 +250,8 @@ public:
             Lbl(N("Info3"), m_x+8, m_y+88, l3, clrSilver, 9);
             Lbl(N("Info4"), m_x+8, m_y+104, l4, clrKhaki, 9);
             Lbl(N("Help"),  m_x+8, m_y+120, l5, clrLightGray, 8);
-            Lbl(N("Log"),   m_x+8, m_y+188, status.LastLine(), clrLightGray, 8);
+            Lbl(N("PM"),    m_x+8, m_y+180, m_pmStatus, m_pmEnabled?clrLightGreen:clrGray, 8);
+            Lbl(N("Log"),   m_x+8, m_y+192, status.LastLine(), clrLightGray, 8);
          }
          else
          {
@@ -257,10 +266,11 @@ public:
             string prof = "-"; if(m_profiles!=NULL){ MM_ProfileRecord pr; if(m_profiles.GetActive(pr)) prof=pr.profile.name; }
             string lim = drag.Active()? m_ui.S_Help() : ("DL "+DoubleToString(gcfg.dailyLossPct,1)+"/"+(gcfg.dailyLossLimitPct>0?DoubleToString(gcfg.dailyLossLimitPct,1):"-")+" DD "+DoubleToString(gcfg.currentDrawdownPct,1)+"/"+(gcfg.maxDrawdownPct>0?DoubleToString(gcfg.maxDrawdownPct,1):"-")+" ["+ModeLabel()+"/"+prof+"]");
             Lbl(N("Help"),  m_x+8, m_y+120, lim, drag.Active()?clrGray:clrLightGray, 8);
-            Lbl(N("Log"),   m_x+8, m_y+188, status.LastLine(), clrLightGray, 8);
+            Lbl(N("PM"),    m_x+8, m_y+180, m_pmStatus, m_pmEnabled?clrLightGreen:clrGray, 8);
+            Lbl(N("Log"),   m_x+8, m_y+192, status.LastLine(), clrLightGray, 8);
          }
          string st = m_storeBlocked ? (m_ui.S_StateBlocked()+": "+m_storeBlockedReason) : "";
-         Lbl(N("State"), m_x+8, m_y+204, st, clrTomato, 8);
+         Lbl(N("State"), m_x+8, m_y+206, st, clrTomato, 8);
          Btn(N("TabM"), m_x+262, m_y+28, 36, 16, m_ui.S_Main(), (m_tab==0)?clrDarkSlateBlue:clrSlateGray);
          Btn(N("TabS"), m_x+262, m_y+46, 36, 16, m_ui.S_Stats(), (m_tab==1)?clrDarkSlateBlue:clrSlateGray);
       }
@@ -294,6 +304,11 @@ public:
             status.Info("STATE","Explicit resolution requested");
             if(m_storeResolveHandler!=NULL) m_storeResolveHandler();
             else status.Warn("STATE","No resolution handler available");
+            return true;
+         }
+         if(sparam==N("Auto")){
+            if(m_pmToggleHandler!=NULL) m_pmToggleHandler();
+            else status.Warn("AUTO","No position management handler available");
             return true;
          }
          if(sparam==N("PosSel")){
@@ -404,10 +419,14 @@ public:
    void Destroy()
    {
       banner.Destroy(); badge.Destroy(); preview.Destroy();
-      string objs[32]={N("BG"),N("Title"),N("Lang"),N("Mini"),N("Info1"),N("Info2"),N("Buy"),N("Sell"),N("Drag"),N("Send"),N("Clr"),N("Resolve"),N("Info3"),N("Info4"),N("Help"),N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll"),N("Log"),N("State"),N("TabM"),N("TabS"),N("CSV"),N("ProfN"),N("PrEx"),N("PrIm")};
-      for(int i=0;i<32;i++) if(ObjectFind(m_chart,objs[i])>=0) ObjectDelete(m_chart,objs[i]);
+      string objs[34]={N("BG"),N("Title"),N("Lang"),N("Mini"),N("Info1"),N("Info2"),N("Buy"),N("Sell"),N("Drag"),N("Send"),N("Clr"),N("Resolve"),N("Info3"),N("Info4"),N("Help"),N("RiskDn"),N("RiskUp"),N("RRLock"),N("TplS"),N("PosSel"),N("BE"),N("Trail"),N("PClose"),N("PCAll"),N("Auto"),N("PM"),N("Log"),N("State"),N("TabM"),N("TabS"),N("CSV"),N("ProfN"),N("PrEx"),N("PrIm")};
+      for(int i=0;i<34;i++) if(ObjectFind(m_chart,objs[i])>=0) ObjectDelete(m_chart,objs[i]);
       ChartRedraw(m_chart);
    }
 };
 
 #endif // MM_PANEL_SHELL_MQH
+
+
+
+

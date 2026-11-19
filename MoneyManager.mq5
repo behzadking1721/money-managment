@@ -17,7 +17,7 @@
 #include "Include/Core/StopLoss.mqh"
 #include "Include/Core/TakeProfit.mqh"
 #include "Include/Core/OrderManager.mqh"
-#include "Include/Core/PositionManager.mqh"
+#include "Include/Position/PositionManagementEngine.mqh"
 #include "Include/State/StateStore.mqh"
 #include "Include/State/RecoveryEngine.mqh"
 #include "Include/Trade/TradeLifecycle.mqh"
@@ -58,6 +58,28 @@ input ENUM_TRAILING_MODE InpTrailMode = TRAIL_NONE;
 input double InpTrailValue = 20;
 input int InpMaxMinutesInTrade = 0;
 
+input group "=== Auto Position Management ==="
+input bool InpAutoMgmtEnabled = true;
+input ENUM_MM_BE_TRIGGER InpAutoBETrigger = MM_BE_TRIGGER_R;
+input double InpAutoBEProfitPoints = 0.0;
+input double InpAutoBERMultiple = 1.0;
+input double InpAutoTrailActivationPoints = 0.0;
+input double InpAutoTrailActivationR = 0.0;
+input double InpAutoTrailUpdateStep = 5.0;
+input bool InpAutoPartialEnabled = false;
+input int InpAutoPartialLevels = 3;
+input double InpAutoPartialPct1 = 30.0;
+input double InpAutoPartialPct2 = 30.0;
+input double InpAutoPartialPct3 = 40.0;
+input double InpAutoPartialR1 = 1.0;
+input double InpAutoPartialR2 = 2.0;
+input double InpAutoPartialR3 = 3.0;
+input bool InpAutoPartialLastFull = false;
+input bool InpAutoTimeExit = false;
+input bool InpAutoManageOnlyOwnMagic = true;
+input bool InpAutoSymbolFilter = false;
+input string InpAutoSymbols = "";
+
 input group "=== Prop Firm ==="
 input bool InpPropFirmEnabled = false;
 input string InpPropPreset = "FTMO";
@@ -78,7 +100,7 @@ input bool InpUILangFA = false;
 input int  InpMagic = MM_MAGIC_DEFAULT;
 
 CRiskEngine g_risk; CStopsValidator g_stops; CExecutionPolicy g_execPolicy; CExecutionRouter g_router;
-CPositionManager g_positions; CProtection g_prot; CPropFirm g_prop; CNewsManager g_news;
+CPositionManagementEngine g_posMgmt; CProtection g_prot; CPropFirm g_prop; CNewsManager g_news;
 CSessionManager g_session; CAlertManager g_alerts; CStatistics g_stats; CProfileManager g_profiles;
 CStateStore g_store; CTradeLifecycle g_lifecycle; CGuardEngine g_guards;
 CRecoveryEngine g_recovery;
@@ -472,6 +494,51 @@ void HandleRuntimeAccountSwitchIfDetected(const int reason)
 
 void HandleStoreResolveRequest();
 
+void BuildPosMgmtConfig(MM_PosMgmtConfig &cfg)
+{
+   cfg.Reset();
+   cfg.enabled = InpAutoMgmtEnabled;
+   cfg.magic = InpMagic;
+   cfg.manageOnlyOwnMagic = InpAutoManageOnlyOwnMagic;
+   cfg.symbolFilterEnabled = InpAutoSymbolFilter;
+   cfg.symbolList = InpAutoSymbols;
+
+   cfg.beEnabled = (InpBEMode!=BE_NONE && InpAutoBETrigger!=MM_BE_TRIGGER_OFF);
+   cfg.beTrigger = InpAutoBETrigger;
+   cfg.beProfitPoints = InpAutoBEProfitPoints;
+   cfg.beRMultiple = InpAutoBERMultiple;
+   cfg.beMode = (InpBEMode==BE_NONE)?BE_AT_BREAKEVEN:InpBEMode;
+   cfg.beExtraPoints = InpBEPoints;
+
+   cfg.trailEnabled = (InpTrailMode!=TRAIL_NONE);
+   cfg.trailMode = (InpTrailMode==TRAIL_NONE)?TRAIL_FIXED:InpTrailMode;
+   cfg.trailValue = InpTrailValue;
+   cfg.trailTimeframe = PERIOD_H1;
+   cfg.trailActivationPoints = InpAutoTrailActivationPoints;
+   cfg.trailActivationR = InpAutoTrailActivationR;
+   cfg.trailUpdateStepPoints = InpAutoTrailUpdateStep;
+
+   cfg.partialEnabled = InpAutoPartialEnabled;
+   int lv = InpAutoPartialLevels;
+   if(lv<0) lv=0; if(lv>MM_PM_MAX_LEVELS) lv=MM_PM_MAX_LEVELS;
+   cfg.partialLevels = lv;
+   cfg.partialPct[0]=InpAutoPartialPct1; cfg.partialPct[1]=InpAutoPartialPct2; cfg.partialPct[2]=InpAutoPartialPct3;
+   cfg.partialTriggerR[0]=InpAutoPartialR1; cfg.partialTriggerR[1]=InpAutoPartialR2; cfg.partialTriggerR[2]=InpAutoPartialR3;
+   cfg.partialLastCloseRemainder = InpAutoPartialLastFull;
+
+   cfg.timeExitEnabled = (InpAutoTimeExit && InpMaxMinutesInTrade>0);
+   cfg.maxMinutes = InpMaxMinutesInTrade;
+}
+
+void HandlePosMgmtToggle()
+{
+   bool on = !g_posMgmt.Enabled();
+   g_posMgmt.SetEnabled(on);
+   g_ui.SetPosMgmtState(on, g_posMgmt.StatusSummary());
+   g_ui.status.Info("AUTO", on?"Automated position management ON":"Automated position management OFF");
+   g_mmLog.Info("PM_TOGGLE", on?"on":"off");
+}
+
 int OnInit()
 {
    // Privacy: no account identifiers in logs or persisted state.
@@ -495,7 +562,6 @@ int OnInit()
 
    g_profiles.Init();
    g_profiles.SetActiveByMode(InpAccountMode);
-   g_positions.Init(); g_positions.SetMagic(InpMagic);
    g_prot.Init();
    g_posTrackCount=0; g_seenDealCount=0;
    g_news.Init();
@@ -514,12 +580,18 @@ int OnInit()
    g_drag.SetSlippage(InpSlippage);
    g_posDrag.Init(0,InpMagic,"MM_PD_");
 
+   MM_PosMgmtConfig pmCfg; BuildPosMgmtConfig(pmCfg);
+   g_posMgmt.Init(InpMagic,pmCfg);
+   g_mmLog.Info("PM_INIT", g_posMgmt.StatusSummary());
+
    g_ui.Init(0,_Symbol,10,50);
    g_ui.SetLang(InpUILangFA);
    g_ui.SetStats(g_stats);
    g_ui.SetProfiles(g_profiles);
    g_ui.SetAccountMode(InpAccountMode);
    g_ui.SetStoreResolutionHandler(HandleStoreResolveRequest);
+   g_ui.SetPosMgmtHandler(HandlePosMgmtToggle);
+   g_ui.SetPosMgmtState(g_posMgmt.Enabled(), g_posMgmt.StatusSummary());
    g_ui.Create();
 
    // Runtime-only account marker (never persisted).
@@ -597,22 +669,8 @@ void OnTick()
    g_prot.SyncPeaks();
 
    // Risk-reducing/existing-position management remains active where possible, even when store/limits block new risk-increasing entries.
-   for(int i=PositionsTotal()-1;i>=0;i--)
-   {
-      ulong ticket=PositionGetTicket(i); if(ticket==0) continue;
-      if(!PositionSelectByTicket(ticket)) continue;
-      if((int)PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
-      if(InpBEMode!=BE_NONE)
-      {
-         string sym=PositionGetString(POSITION_SYMBOL);
-         double point=SymbolInfoDouble(sym,SYMBOL_POINT); if(point<=0) continue;
-         double slPts=PriceToPoints(sym,MathAbs(PositionGetDouble(POSITION_PRICE_OPEN)-PositionGetDouble(POSITION_SL)));
-         if(slPts>0 && MathAbs(PositionGetDouble(POSITION_PRICE_CURRENT)-PositionGetDouble(POSITION_PRICE_OPEN))/point >= slPts)
-            g_positions.MoveToBreakEven(ticket,InpBEMode,InpBEPoints);
-      }
-      if(InpTrailMode!=TRAIL_NONE) g_positions.TrailStop(ticket,InpTrailMode,InpTrailValue);
-      if(InpMaxMinutesInTrade>0) g_positions.TimeBasedExit(ticket,InpMaxMinutesInTrade);
-   }
+   // Phase 16: all automated in-trade management is owned by the single Position Management Engine.
+   g_posMgmt.OnTick();
 
    g_drag.OnTickUpdate();
    g_posDrag.OnTick();
@@ -620,6 +678,7 @@ void OnTick()
    RefreshGuardConfig();
    g_ui.SetAccountMode(EffectiveAccountMode());
    UpdateStoreStatusUi();
+   g_ui.SetPosMgmtState(g_posMgmt.Enabled(), g_posMgmt.StatusSummary());
    g_ui.Update(g_session, g_news, g_drag, g_risk, g_stops, g_guards, g_riskCtx, g_guardCfg);
 }
 
@@ -791,3 +850,4 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
    }
 }
 //+------------------------------------------------------------------+
+

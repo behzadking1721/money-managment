@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here (phase-based).
 
+### Phase 16 — Automated Position Management Integration (2026-11-19)
+
+- **Added:** `Include/Position/PositionManagementEngine.mqh` — automated position management engine on top of hardened `CPositionManager`: per-ticket/per-lifecycle automation (hedging and netting), automated Break Even (points/R/ANY, one-time per stage), automated trailing (fixed/ATR/candle, activation, step), multi-level partial close with server-confirmed execution, time-based exit, magic+symbol filtering, pending-confirmation state machine.
+- **Added:** Restart-safe partial stage reconstruction from live positions + broker deal history (`HistorySelectByPosition`). Unknown/ambiguous history treated as UNKNOWN; partial-close stages not re-executed (fail safe); BE/trailing remain available (monotonic/duplicate-safe).
+- **Added:** `MoneyManager.mq5` auto-management integration — 16 inputs in `=== Auto Position Management ===` group, `BuildPosMgmtConfig()`, `HandlePosMgmtToggle()`, engine init in `OnInit`, `OnTick()` delegation, UI status wiring.
+- **Added:** `Include/UI/PanelShell.mqh` — `Auto` toggle button + `PM` status label.
+- **Added tests:** `Tests/Phase16/EngineMath_Test.mq5`, `Tests/Phase16/RestartSafety_Test.mq5`, `Tests/Phase16/MultiPosition_Test.mq5` — deterministic decision math, fail-safe restart, multi-position cases.
+- **All Phase 16 tests compile clean:** 0 errors, 0 warnings after MQL5 const/`StringToUpper` reference fixes and status-parameter rename.
+- **MoneyManager.mq5 compiles clean:** 0 errors, 0 warnings.
+- **TD-19 added:** no parallel position-management state file; restart safety via live positions + deal history reconstruction (fail safe on unknown history).
+
 ### Phase 15 — Position Management Safety & Reliability (2026-11-19)
 
 - **Hardened:** `Include/Core/PositionManager.mqh` — MoveToBreakEven, TrailStop, PartialClose, TimeBasedExit now check SYMBOL_TRADE_STOPS_LEVEL and SYMBOL_TRADE_FREEZE_LEVEL, normalize SL/price to symbol digits, validate volume against VOLUME_MIN/VOLUME_MAX/VOLUME_STEP, check server retcodes (not just CTrade bool), preserve TP, prevent SL loosening, guard maxMinutes <= 0, avoid repeated close attempts, and track last error/retcode.

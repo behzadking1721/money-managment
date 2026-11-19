@@ -220,6 +220,25 @@
   - Deterministic tests cover BE/trail direction, SL protection, invalid ATR, stop/freeze rejection, tick normalization, partial close boundaries, invalid percentages, time exit disabled, multi-position same symbol, magic filtering.
 - **Relevant tests:** `Tests/Phase15/PositionManager_Test.mq5`, `Tests/Phase15/PositionDragTool_Test.mq5`.
 
+## Phase 16 — Automated Position Management Integration
+
+- **Objective:** Introduce a modular engine (`PositionManagementEngine.mqh`) on top of the hardened `CPositionManager` (Phase 15) that coordinates automated Break Even, trailing stop (fixed/ATR/candle), multi-level partial close, time-based exit, multi-position/hedging/netting management, restart-safe stage reconstruction, magic+symbol filtering, and UI status display.
+- **Existing modules to reuse:** `Include/Core/PositionManager.mqh`, `Include/Core/Logger.mqh`, `Include/UI/PanelShell.mqh`, `MoneyManager.mq5` input/config/handler wiring.
+- **Expected changes:**
+  - New `Include/Position/PositionManagementEngine.mqh` with pure static decision helpers (`ProfitPointsOf`, `RMultipleOf`, `BETriggerReached`, `TrailActivationReached`, `ComputeTrailSL`, `IsProtectiveImprovement`, `ComputePartialCloseVolume`, `DeriveLevelMask`, `PartialLevelTriggerReached`, `PendingCloseConfirmed`, `IsSameLifecycle`) and runtime `OnTick()`/`ManagePosition()` with pending-confirmation state machine.
+  - Restart-safe partial-stage reconstruction from live positions + broker deal history (`HistorySelectByPosition`). Unknown/ambiguous history (netting `DEAL_ENTRY_INOUT`, no entry deals, history failure) is treated as UNKNOWN and partial-close stages are NOT re-executed (fail safe); BE/trailing remain available because they are monotonic/duplicate-safe.
+  - `MoneyManager.mq5` integration: 16 auto-management inputs (`InpAutoMgmtEnabled`, `InpAutoBETrigger`, `InpAutoBERMultiple`, `InpAutoTrailActivation*`, `InpAutoPartial*`, `InpAutoManageOnlyOwnMagic`, `InpAutoSymbolFilter`, `InpAutoSymbols`, `InpAutoTimeExit`), `BuildPosMgmtConfig()` + `HandlePosMgmtToggle()`, engine init in `OnInit`, `OnTick()` delegation replacing inline BE/trail/time loop.
+  - `PanelShell.mqh` UI: `Auto` toggle button + `PM` status label.
+- **Persistence decision (TD-19):** No parallel state file. Rationale documented in `Docs/TECHNICAL_DEBT.md` TD-19 and in-engine header.
+- **Dependencies:** Phase 15 (`CPositionManager`), `PanelShell`/`MoneyManager` UI wiring.
+- **Acceptance criteria:**
+  - All phase 16 tests compile clean (0 errors, 0 warnings).
+  - Deterministic engine-math tests cover profit/R multiples, BE trigger variants (points/R/ANY/OFF), trail activation + candidate SL (fixed/ATR/candle), protective-improvement monotonicity, partial-close volume boundaries (0%, 100%, below-min, remainder, level mask derivation), partial-level trigger, pending-close confirmation, magic/symbol filtering, status, and OnTick no-op when no positions.
+  - Restart-safety tests cover history-unavailable/INOUT/non-eligible cases.
+  - Multi-position tests cover hedging/netting lifecycle isolation and no cross-position influence.
+  - MoneyManager.mq5 compiles clean with integrated engine.
+- **Relevant tests:** `Tests/Phase16/EngineMath_Test.mq5`, `Tests/Phase16/RestartSafety_Test.mq5`, `Tests/Phase16/MultiPosition_Test.mq5`.
+
 ## Persistence & Recovery (next phase priority — not an independent roadmap phase)
 
 There is **no independent "Persistence and Recovery Engine" phase** in the roadmap. Persistence/recovery safety gaps are addressed as the next phase priority, mapping to tech-debt items **TD-05** (High: state persistence/migration/gating under restart/upgrade/corruption scenarios) and **TD-17** (High: time-fallback impacts on resets/counters if not fully surfaced/gated).
