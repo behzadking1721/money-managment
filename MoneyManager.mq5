@@ -194,6 +194,8 @@ double EffMaxSpread(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr) && pr.ma
 bool   EffNewsEnabled(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return pr.newsEnabled; return InpNewsEnabled; }
 bool   EffNewsBlackout(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return (pr.newsBlackoutHigh || InpNewsBlackout); return InpNewsBlackout; }
 bool   EffNewsOfflineBlock(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr)) return (pr.newsOfflineBlock || InpNewsOfflineBlock); return InpNewsOfflineBlock; }
+int    EffNewsMinutesBefore(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr) && pr.newsBeforeMin>0) return pr.newsBeforeMin; return InpNewsMinutesBefore; }
+int    EffNewsMinutesAfter(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr) && pr.newsAfterMin>0) return pr.newsAfterMin; return InpNewsMinutesAfter; }
 
 bool StoreReadyForRiskIncreasing()
 {
@@ -317,7 +319,10 @@ void RefreshGuardConfig()
    }
 
    bool newsEnabled = EffNewsEnabled();
-   bool inBlackout = (newsEnabled && g_news.IsNewsBlackout(_Symbol,InpNewsMinutesBefore,InpNewsMinutesAfter));
+   int nb = EffNewsMinutesBefore(); if(nb < 0) nb = 0;
+   int na = EffNewsMinutesAfter(); if(na < 0) na = 0;
+   // Blackout evaluated against known events only; stale/unavailable handled explicitly by guards (warn/block per config).
+   bool inBlackout = (newsEnabled && g_news.IsNewsBlackout(_Symbol, nb, na, 3));
    g_guardCfg.newsEnabled = newsEnabled;
    g_guardCfg.newsBlackoutOnHigh = EffNewsBlackout();
    g_guardCfg.newsOfflineBlock = EffNewsOfflineBlock();
@@ -327,7 +332,7 @@ void RefreshGuardConfig()
    g_guardCfg.newsUpcomingWarn = false;
 
    g_guardCfg.sessionFilterEnabled = InpSessionFilter;
-   g_guardCfg.sessionAllowed = !InpSessionFilter || (g_session.Current()!=SESSION_OFF);
+   g_guardCfg.sessionAllowed = g_session.IsAllowed(InpSessionFilter);
    g_guardCfg.spreadCheckEnabled = (EffMaxSpread()>0 || InpSpreadWarnPoints>0);
    g_guardCfg.maxSpreadPoints = EffMaxSpread();
    g_guardCfg.spreadWarnPoints = InpSpreadWarnPoints;

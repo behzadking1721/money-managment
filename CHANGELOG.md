@@ -28,6 +28,9 @@ All notable changes to this project are documented here (phase-based).
 ### Phase 9 progress (2026-11-19)
 - **Phase 9 (Risk Guardian and Account Protection, in progress):** Hardened `CProtection` exposure dedupe ring handling (correct ring insert/lookup/head reset on overflow) to preserve recent dedupe/count integrity, and made cooldown/consecutive-loss expiry/reset behavior predictable (`CheckCooldown`/`CheckConsecutiveLoss` consistent with `UpdateCooldown`). Weekly/monthly realized loss accounting, server-time period sync/reset, guard priority/first-block and preview/send consistency, and existing preflight/state-operational gating remain intact (risk-reducing position management unchanged). Added focused test `Tests/Phase9/RiskGuardian_Test.mq5`. Compiles clean (0 errors, 0 warnings); runtime MT5 script/demo verification **not run**.
 
+### Phase 10 progress (2026-11-19)
+- **Phase 10 (News and Trading Sessions, in progress):** Removed synthetic default news events and made unavailable/stale/live-fetch-unverified states explicit (no silent assumptions, no false blackouts from invented data); blackout evaluation limited to known symbol/currency-relevant events with effective profile/input blackout windows. Session detection hardened with UTC-based, approx DST-aware range handling and explicit filter-allowed helper wired into guard config. Added focused test `Tests/Phase10/NewsSession_Test.mq5`. Compiles clean (0 errors, 0 warnings); runtime MT5 script/demo verification **not run**. Live provider WebRequest/fetch-parsing and exchange-accurate DST/calendar mapping remain unverified/deferred.
+
 ## [v0.7.0-phase7] - 2026-11-18 (Phase 7: Hardening)
 
 ### Added
