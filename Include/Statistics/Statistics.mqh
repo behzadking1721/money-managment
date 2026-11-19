@@ -145,14 +145,19 @@ private:
       if(t.positionId==0) return;
       if(PositionSelectByTicket((ulong)t.positionId))
       {
-         t.volumeRemain = PositionGetDouble(POSITION_VOLUME);
-         t.sl = PositionGetDouble(POSITION_SL);
-         t.openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         // netting reversal guard: only sync if position direction matches tracked side
+         if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==t.side)
+         {
+            t.volumeRemain = PositionGetDouble(POSITION_VOLUME);
+            t.sl = PositionGetDouble(POSITION_SL);
+            t.openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         }
          return;
       }
       if(t.symbol!="" && PositionSelect(t.symbol))
       {
-         if((long)PositionGetInteger(POSITION_IDENTIFIER)==t.positionId || (long)PositionGetInteger(POSITION_TICKET)==t.positionId)
+         if(((long)PositionGetInteger(POSITION_IDENTIFIER)==t.positionId || (long)PositionGetInteger(POSITION_TICKET)==t.positionId)
+            && (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==t.side)
          {
             t.volumeRemain = PositionGetDouble(POSITION_VOLUME);
             t.sl = PositionGetDouble(POSITION_SL);
@@ -161,17 +166,23 @@ private:
       }
    }
 
-   // Returns true while the tracked position is still present on the server.
+   // Returns true while the tracked position is still present on the server with the expected direction.
    // Checks by ticket first (POSITION_TICKET == positionId), then by symbol
    // (netting accounts where the position id equals the position identifier).
-   bool PositionStillOpen(long positionId,const string symbol)
+   // If the server position direction differs from expectedSide, it is a netting reversal -> not still open.
+   bool PositionStillOpen(long positionId,const string symbol, ENUM_POSITION_TYPE expectedSide=POSITION_TYPE_BUY)
    {
       if(positionId==0) return false;
-      if(PositionSelectByTicket((ulong)positionId)) return true;
+      if(PositionSelectByTicket((ulong)positionId))
+      {
+         if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==expectedSide) return true;
+         return false; // direction flipped: netting reversal, tracked position is closed
+      }
       if(symbol!="" && PositionSelect(symbol))
       {
-         if((long)PositionGetInteger(POSITION_IDENTIFIER)==positionId) return true;
-         if((long)PositionGetInteger(POSITION_TICKET)==positionId) return true;
+         if(((long)PositionGetInteger(POSITION_IDENTIFIER)==positionId || (long)PositionGetInteger(POSITION_TICKET)==positionId)
+            && (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==expectedSide)
+            return true;
       }
       return false;
    }
@@ -262,7 +273,8 @@ private:
       if(m_liveSync)
       {
          SyncOpenFromPosition(m_open[idx]);
-         if(m_open[idx].volumeRemain <= 0.0 || !PositionStillOpen(m_open[idx].positionId, m_open[idx].symbol))
+         // expectedSide = tracked position side; if server position flipped, it's a reversal -> not still open
+         if(m_open[idx].volumeRemain <= 0.0 || !PositionStillOpen(m_open[idx].positionId, m_open[idx].symbol, m_open[idx].side))
             finalized=true;
       }
       else
@@ -277,6 +289,40 @@ private:
       {
          double totalVol = m_open[idx].closedVolume; if(totalVol<=0) totalVol=m_open[idx].volumeInitial;
          FinalizeTrade(idx,event,m_open[idx].realizedProfit,m_open[idx].realizedCommission,m_open[idx].realizedSwap,totalVol,m_open[idx].lastEventTime,event.price);
+
+         // INOUT netting reversal: position still exists under preserved identifier but with opposite direction.
+         // Start a new logical lifecycle for the opposite exposure without merging/carryover.
+         if(m_liveSync && event.reasonCode=="INOUT")
+         {
+            bool posExists=false;
+            ENUM_POSITION_TYPE posType=POSITION_TYPE_BUY;
+            double posVol=0, posPrice=0, posSl=0;
+            if(PositionSelectByTicket((ulong)m_open[idx].positionId))
+            {
+               posExists=true; posType=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+               posVol=PositionGetDouble(POSITION_VOLUME); posPrice=PositionGetDouble(POSITION_PRICE_OPEN); posSl=PositionGetDouble(POSITION_SL);
+            }
+            else if(m_open[idx].symbol!="" && PositionSelect(m_open[idx].symbol))
+            {
+               if(((long)PositionGetInteger(POSITION_IDENTIFIER)==m_open[idx].positionId || (long)PositionGetInteger(POSITION_TICKET)==m_open[idx].positionId))
+               {
+                  posExists=true; posType=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+                  posVol=PositionGetDouble(POSITION_VOLUME); posPrice=PositionGetDouble(POSITION_PRICE_OPEN); posSl=PositionGetDouble(POSITION_SL);
+               }
+            }
+            if(posExists && posType!=m_open[idx].side)
+            {
+               MM_TradeEvent openEv; openEv.Reset();
+               openEv.type=MM_EVENT_OPEN;
+               openEv.positionId=m_open[idx].positionId;
+               openEv.ticket=event.ticket;
+               openEv.symbol=m_open[idx].symbol;
+               openEv.side=posType;
+               openEv.volume=posVol; openEv.price=posPrice; openEv.sl=posSl;
+               openEv.timeServer=event.timeServer;
+               HandleOpen(openEv);
+            }
+         }
       }
       // Keep initialRiskMoney as lifecycle baseline for R on the aggregated completed trade.
       // Remaining open risk is derived from remaining volume (live calc/fallback) without mutating baseline.

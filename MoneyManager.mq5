@@ -153,18 +153,25 @@ void MarkDealSeen(ulong dealTicket)
    if(g_seenDealCount < MM_MAX_SEEN_DEALS) g_seenDealTickets[g_seenDealCount++]=dealTicket;
    else { g_seenDealTickets[g_seenDealCount % MM_MAX_SEEN_DEALS]=dealTicket; g_seenDealCount = MM_MAX_SEEN_DEALS + ((g_seenDealCount-MM_MAX_SEEN_DEALS+1)%MM_MAX_SEEN_DEALS); }
 }
-bool PositionStillOpen(long positionId,const string symbol)
-{
-   if(positionId<=0) return false;
-   if(PositionSelectByTicket((ulong)positionId)) return (PositionGetDouble(POSITION_VOLUME)>0.0);
-   if(symbol!="" && PositionSelect(symbol))
+bool PositionStillOpen(long positionId,const string symbol, ENUM_POSITION_TYPE expectedSide=POSITION_TYPE_BUY)
    {
-      // netting: POSITION_IDENTIFIER stable across reversal (ticket may change)
-      if((long)PositionGetInteger(POSITION_IDENTIFIER)==positionId || (long)PositionGetInteger(POSITION_TICKET)==positionId)
-         return (PositionGetDouble(POSITION_VOLUME)>0.0);
+      if(positionId<=0) return false;
+      if(PositionSelectByTicket((ulong)positionId))
+      {
+         if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==expectedSide)
+            return (PositionGetDouble(POSITION_VOLUME)>0.0);
+         return false; // direction flipped: netting reversal, not still open
+      }
+      if(symbol!="" && PositionSelect(symbol))
+      {
+         // netting: POSITION_IDENTIFIER stable across reversal (ticket may change)
+         if(((long)PositionGetInteger(POSITION_IDENTIFIER)==positionId || (long)PositionGetInteger(POSITION_TICKET)==positionId)
+            && (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==expectedSide)
+            return (PositionGetDouble(POSITION_VOLUME)>0.0);
+         return false; // id matches but direction flipped -> netting reversal
+      }
+      return false;
    }
-   return false;
-}
 void FinalizeCompletedLifecycle(int idx, datetime evTime)
 {
    if(idx<0 || idx>=MM_MAX_POS_TRACK) return;
@@ -733,10 +740,11 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
          g_posTrack[ti].netRealized += dealNet;
          g_posTrack[ti].closedVolume += vol;
          if(sym!="") g_posTrack[ti].symbol=sym;
-         g_posTrack[ti].lastEventTime = evTime;
-         bool stillOpen = PositionStillOpen(posId, g_posTrack[ti].symbol);
-         if(!stillOpen)
-            FinalizeCompletedLifecycle(ti, evTime); // completed directional lifecycle -> single accounting update
+          g_posTrack[ti].lastEventTime = evTime;
+          ENUM_POSITION_TYPE expSide = (dt==DEAL_TYPE_BUY)?POSITION_TYPE_SELL:POSITION_TYPE_BUY;
+          bool stillOpen = PositionStillOpen(posId, g_posTrack[ti].symbol, expSide);
+          if(!stillOpen)
+             FinalizeCompletedLifecycle(ti, evTime); // completed directional lifecycle -> single accounting update
          // Partial close: aggregated, no streak update, no exposure count increment.
       }
       else if(entry==DEAL_ENTRY_INOUT)
@@ -751,10 +759,11 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
          g_posTrack[ti].netRealized += dealNet;
          g_posTrack[ti].closedVolume += vol;
          if(sym!="") g_posTrack[ti].symbol=sym;
-         g_posTrack[ti].lastEventTime = evTime;
+          g_posTrack[ti].lastEventTime = evTime;
 
-         bool stillOpen = PositionStillOpen(posId, g_posTrack[ti].symbol);
-         if(stillOpen)
+          ENUM_POSITION_TYPE expSide = (dt==DEAL_TYPE_BUY)?POSITION_TYPE_SELL:POSITION_TYPE_BUY;
+          bool stillOpen = PositionStillOpen(posId, g_posTrack[ti].symbol, expSide);
+          if(stillOpen)
          {
             // Netting reversal: previous directional trade closed, opposite exposure remains open under preserved POSITION_IDENTIFIER (ticket may change).
             // Finalize previous lifecycle once; start new logical lifecycle for opposite exposure without merging/carryover (no split invention).

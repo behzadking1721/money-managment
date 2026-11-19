@@ -38,16 +38,23 @@ private:
       if(m_rejectCount>=MM_MAX_REJECT_LOG) m_rejectHead=(m_rejectHead+1)%MM_MAX_REJECT_LOG;
    }
 
-   bool PositionStillOpen(long positionId, const string symbol)
+   bool PositionStillOpen(long positionId, const string symbol, ENUM_POSITION_TYPE expectedSide=POSITION_TYPE_BUY)
    {
       if(positionId<=0) return false;
       // hedging/netting: position ticket commonly equals position id
-      if(PositionSelectByTicket((ulong)positionId)) return (PositionGetDouble(POSITION_VOLUME)>0.0);
+      if(PositionSelectByTicket((ulong)positionId))
+      {
+         if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==expectedSide)
+            return (PositionGetDouble(POSITION_VOLUME)>0.0);
+         return false; // position exists but direction flipped (netting reversal) -> not still open
+      }
       // netting fallback by symbol
       if(symbol!="" && PositionSelect(symbol))
       {
-         if((long)PositionGetInteger(POSITION_IDENTIFIER)==positionId || (long)PositionGetInteger(POSITION_TICKET)==positionId)
+         if(((long)PositionGetInteger(POSITION_IDENTIFIER)==positionId || (long)PositionGetInteger(POSITION_TICKET)==positionId)
+            && (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE)==expectedSide)
             return (PositionGetDouble(POSITION_VOLUME)>0.0);
+         return false; // id matches but direction flipped -> netting reversal, not still open
       }
       return false;
    }
@@ -133,23 +140,26 @@ public:
             ev.type=MM_EVENT_OPEN; ev.reasonCode="OPEN";
             Dispatch(ev);
          }
-         else if(entry==DEAL_ENTRY_OUT)
-         {
-            bool stillOpen = PositionStillOpen(ev.positionId, ev.symbol);
-            ev.type = stillOpen ? MM_EVENT_PARTIAL_FILL : MM_EVENT_CLOSE;
-            ev.reasonCode = stillOpen ? "PARTIAL_CLOSE" : "CLOSE";
-            ev.reason = stillOpen ? "partial_close" : "close";
-            Dispatch(ev);
-         }
-         else if(entry==DEAL_ENTRY_INOUT)
-         {
-            // reversal/netting: treat as close (and possible open component handled by separate deal if present)
-            bool stillOpen = PositionStillOpen(ev.positionId, ev.symbol);
-            ev.type = stillOpen ? MM_EVENT_PARTIAL_FILL : MM_EVENT_CLOSE;
-            ev.reasonCode = "INOUT";
-            ev.reason = stillOpen ? "inout_partial" : "inout_close";
-            Dispatch(ev);
-         }
+          else if(entry==DEAL_ENTRY_OUT)
+             {
+                // expected side = position type being closed (opposite of deal direction)
+                ENUM_POSITION_TYPE expSide = (dt==DEAL_TYPE_BUY)?POSITION_TYPE_SELL:POSITION_TYPE_BUY;
+                bool stillOpen = PositionStillOpen(ev.positionId, ev.symbol, expSide);
+                ev.type = stillOpen ? MM_EVENT_PARTIAL_FILL : MM_EVENT_CLOSE;
+                ev.reasonCode = stillOpen ? "PARTIAL_CLOSE" : "CLOSE";
+                ev.reason = stillOpen ? "partial_close" : "close";
+                Dispatch(ev);
+             }
+          else if(entry==DEAL_ENTRY_INOUT)
+             {
+                // reversal/netting: treat as close (and possible open component handled by separate deal if present)
+                ENUM_POSITION_TYPE expSide = (dt==DEAL_TYPE_BUY)?POSITION_TYPE_SELL:POSITION_TYPE_BUY;
+                bool stillOpen = PositionStillOpen(ev.positionId, ev.symbol, expSide);
+                ev.type = stillOpen ? MM_EVENT_PARTIAL_FILL : MM_EVENT_CLOSE;
+                ev.reasonCode = "INOUT";
+                ev.reason = stillOpen ? "inout_partial" : "inout_close";
+                Dispatch(ev);
+             }
          else
          {
             ev.type=MM_EVENT_DEAL_ADD; ev.reasonCode="DEAL";

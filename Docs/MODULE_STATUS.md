@@ -13,7 +13,7 @@ Classification legend:
 
 | File path | Responsibility | Status | Actively used by EA | Dependencies | Known limitations |
 |---|---|---|---|---|---|
-| `MoneyManager.mq5` | EA orchestration, inputs, module wiring, event/timer/tick handlers, context refresh, in-trade management hooks | Complete | Yes (main entry) | Most `Include/*` modules, MT5 trade/account/chart APIs | Contains significant integration logic; behavior depends on correct runtime wiring and input/profile combinations |
+| `MoneyManager.mq5` | EA orchestration, inputs, module wiring, event/timer/tick handlers, context refresh, in-trade management hooks | Complete | Yes (main entry) | Most `Include/*` modules, MT5 trade/account/chart APIs | `PositionStillOpen` direction guard prevents netting reversal false-positive; INOUT reversal starts new logical lifecycle; contains significant integration logic |
 | `Include/Utils/Common.mqh` | Common enums/structs/constants and utility helpers (lot normalization, points/prices, ATR/spread/suffix/account helpers) | Complete | Yes | MQL5 trade/symbol/account includes | Some constants/structs overlap conceptually with newer contracts; verify unused legacy types before relying on them |
 | `Include/Core/Contracts.mqh` | Canonical shared contracts (plan/risk/guard/exec/events, listener/reject interfaces, config structs) | Complete | Yes | MQL5 std types, project conventions | Schema evolution requires version/migration discipline (see `Docs/contracts.md`) |
 | `Include/Core/SimpleJson.mqh` | Minimal JSON builder/reader for known schemas (state/profiles persistence support) | Partially Complete | Yes (indirect via state/profiles modules) | File/string parsing utilities | Limited/general-purpose JSON support; see `Docs/simplejson-limitations.md` |
@@ -50,7 +50,7 @@ Classification legend:
 
 | File path | Responsibility | Status | Actively used by EA | Dependencies | Known limitations |
 |---|---|---|---|---|---|
-| `Include/Trade/TradeLifecycle.mqh` | Normalize `OnTradeTransaction` into events, dispatch listeners, record rejects, handle partial/full close semantics | Partially Complete | Yes | MT5 trade transaction structs, listener interfaces, logger/reject sink | Full hedging vs netting parity and all broker edge cases require runtime validation |
+| `Include/Trade/TradeLifecycle.mqh` | Normalize `OnTradeTransaction` into events, dispatch listeners, record rejects, handle partial/full close semantics | Partially Complete | Yes | MT5 trade transaction structs, listener interfaces, logger/reject sink | `PositionStillOpen` now verifies position direction to prevent netting reversal false-positive; runtime validation on demo pending |
 | `Include/State/StateStore.mqh` | Per-account JSON state persistence with lock, stale takeover, atomic save/bak, migration/fail-safe, baselines/peaks/counters | Partially Complete | Yes | `SimpleJson`, file I/O, contracts/time helpers | `IsOperational` fail-safe must be honored by all actions; schema/migration and full UI/template persistence coverage need continued verification |
 | `Include/State/RecoveryEngine.mqh` | Restart recovery orchestration on top of `CStateStore`: backup fallback, corrupt-data handling, continuity-uncertain gating, explicit-resolution-only init; risk-reduction stays active in blocked state | Partially Complete | Yes (wired in `MoneyManager.mq5`) | `StateStore`, `Contracts`, `Logger` | Recovery execution evidence pending; runtime restart/backup-fallback validation on demo not yet run |
 | `Include/Profiles/Profiles.mqh` | Default profiles, effective parameter resolution, active profile selection, per-account persistence, import/export | Complete | Yes | `SimpleJson`, file I/O, contracts/enums | Import/export paths and schema evolution require validation; UI exposure is subset of all profile fields |
@@ -68,7 +68,7 @@ Classification legend:
 
 | File path | Responsibility | Status | Actively used by EA | Dependencies | Known limitations |
 |---|---|---|---|---|---|
-| `Include/Statistics/Statistics.mqh` | Lifecycle listener for trade tracking, KPI computation, open-risk estimation, per-mode views, CSV export | Partially Complete | Yes | Trade events, file I/O, account/mode context | Partial-close/netting-hedging parity and full accounting fidelity require validation; open-risk limited without SL |
+| `Include/Statistics/Statistics.mqh` | Lifecycle listener for trade tracking, KPI computation, open-risk estimation, per-mode views, CSV export | Partially Complete | Yes | Trade events, file I/O, account/mode context | `PositionStillOpen`/`SyncOpenFromPosition` direction guard prevents netting reversal mismatch; INOUT reversal starts new track; open-risk limited without SL |
 | `Include/Alerts/Alerts.mqh` | Cooldowned alerts for guards/news/connection/DD events (log/popup/sound/push as configured) | Complete | Yes | `StatusLog`/logger hooks, MT5 alert APIs | Delivery depends on terminal settings/permissions (push/email/sound/popup availability) |
 
 ## 7. UI Modules

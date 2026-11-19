@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here (phase-based).
 
+### Phase 13 — Hedging & Netting Compatibility (TD-02) (2026-11-19)
+
+- **Fixed:** `PositionStillOpen` in `Include/Trade/TradeLifecycle.mqh`, `Include/Statistics/Statistics.mqh`, and `MoneyManager.mq5` now verifies `POSITION_TYPE` matches the expected side before reporting a position as "still open." Previously, netting reversals (BUY↔SELL with preserved `POSITION_IDENTIFIER`) false-positive matched the new reversed position, causing old directional lifecycles to be misclassified as partial closes instead of completed closes.
+- **Fixed:** `SyncOpenFromPosition` in `Statistics.mqh` direction-guards sync to prevent tracking data from a reversed position under a preserved identifier.
+- **Fixed:** `HandlePartialClose` in `Statistics.mqh` starts a new logical lifecycle track for INOUT reversal opposite exposure (no carryover/merge) when the server position still exists with flipped direction.
+- **Fixed:** `MoneyManager.mq5` `OnTradeTransaction` passes expected side (derived from deal type) to `PositionStillOpen` for DEAL_ENTRY_OUT and DEAL_ENTRY_INOUT.
+- **Added test:** `Tests/Phase13/HedgingNetting_Test.mq5` — deterministic checks for hedging multi-position, hedging partial close, netting volume increase/decrease, netting reversal (BUY→SELL, SELL→BUY), aggregate open risk, net PnL with no double counting, SL/TP management, plus Phase 12/2.3 regressions.
+- **TD-02** moved from Potential Defects to Addressed in `Docs/TECHNICAL_DEBT.md`.
+- **Zero new trading behavior introduced** for non-reversal paths; no martingale added.
+
 ## [v1.0.0] - 2026-11-18
 
 ### Summary

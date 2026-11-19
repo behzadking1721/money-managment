@@ -102,6 +102,21 @@ Use this checklist for demo/validation. Record evidence (screenshots, logs, Stra
 - [ ] Unknown retcodes, symbol property gaps, magic/suffix cases logged and handled safely.
 - [ ] Bilingual EN/FA labels and tooltips render correctly in panel/preview/drag elements.
 
+## Phase 13 — Hedging & Netting Compatibility (TD-02)
+### Build / Scripts
+- [ ] `Tests/Phase13/HedgingNetting_Test.mq5` passes:
+    - Hedging: multiple positions on same symbol (opposite directions coexist)
+    - Hedging: partial close leaves remaining volume, lifecycle not finalized
+    - Netting: volume increase aggregates to net position
+    - Netting: volume decrease leaves remaining volume, still open
+    - Netting: BUY→SELL reversal detected by direction flip; old lifecycle finalized, new track started
+    - Netting: SELL→BUY reversal detected by direction flip; old lifecycle finalized, new track started
+    - Aggregate open risk sums per-position SL-distance risk; no-SL positions excluded
+    - Net PnL = profit + commission + swap + fee; duplicate deal IDs not double-counted
+    - SL/TP management: valid SL move-up for BUY; TP levels ascending above open
+    - Regression: StateStore fresh init blocks risk-increasing; risk-reduction active invariant
+    - Regression: Protection guard blocks on daily loss limit / max DD / consec loss cooldown
+
 ## Final Acceptance
 - [ ] All requested phase code compiled clean (0 errors, 0 warnings).
 - [ ] Critical flows (drag preview → guard preflight → confirm → send/modify/close) verified on demo.
