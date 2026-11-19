@@ -13,6 +13,11 @@ All notable changes to this project are documented here (phase-based).
 ### Notes
 - Pending: final demo validation and Strategy Tester coverage (see `Docs/tech-debt.md`, `Docs/test-checklist.md`). Record evidence in `Docs/phase1-test-results.md` and phase test artifacts as applicable.
 
+### Phase 2.3 Runtime Verification (2026-11-19)
+- **Status:** Completed – Unit/Script Runtime Verified (recorded in `Docs/Implementation/PHASE_2_3_RUNTIME_VERIFICATION.md`).
+- **MT5 script runtime results (reported):** `Tests/Phase3/GuardEngine_Test.mq5` ALL PASS, `Tests/Phase2_3/ProtectionLimits_Test.mq5` ALL PASS, `Tests/Phase2_3/TradeAggregation_Test.mq5` ALL PASS. **Total: 70 assertions successful.**
+- **Limitations (pending):** Netting reversal integration not yet executed on a Netting account; EA integration testing on a demo account is not complete. No successful tests or Phase 2.1/2.2 logic changed for this status record.
+
 ## [v0.7.0-phase7] - 2026-11-18 (Phase 7: Hardening)
 
 ### Added

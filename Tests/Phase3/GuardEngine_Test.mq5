@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //|                                             GuardEngine_Test.mq5 |
-//|                 Phase 3: unified guards, priority, sink routing  |
+//|      Phase 3 + 2.3: unified guards, priority, sink, limits      |
 //+------------------------------------------------------------------+
 #property script_show_inputs
 #include "..\\..\\Include\\Guards\\GuardEngine.mqh"
-#include "..\\..\\Include\\Core\RejectSink.mqh"
+#include "..\\..\\Include\\Core\\RejectSink.mqh"
 
 int g_fail=0; int g_sinkCalls=0; string g_lastCode="";
 void Assert(bool c,const string n){ if(!c){Print("FAIL: ",n); g_fail++;} else Print("OK: ",n); }
@@ -30,7 +30,7 @@ void OnStart()
    bool ok=eng.CanExecute(plan,cfg,rep);
    Assert(ok && rep.allowed, "allow when clean");
 
-   // Protection block
+   // Protection block - daily loss
    MM_GuardConfig c1=cfg; c1.dailyLossLimitPct=5.0; c1.dailyLossPct=5.0;
    ok=eng.CanExecute(plan,c1,rep);
    Assert(!ok && rep.hasBlock && rep.firstBlock.reasonCode=="DAILY_LOSS_LIMIT", "daily loss block");
@@ -72,6 +72,36 @@ void OnStart()
    MM_GuardConfig c8=cfg; c8.dailyLossLimitPct=5.0; c8.dailyLossPct=5.0;
    ok=eng.Preview(plan,c8,rep);
    Assert(!ok && g_sinkCalls==0, "preview no sink side-effects");
+
+   // Phase 2.3: weekly/monthly loss, max drawdown, daily trades, consecutive loss, cooldown
+   MM_GuardConfig c9=cfg; c9.weeklyLossLimitPct=5.0; c9.weeklyLossPct=5.0;
+   ok=eng.CanExecute(plan,c9,rep);
+   Assert(!ok && rep.hasBlock && rep.firstBlock.reasonCode=="WEEKLY_LOSS_LIMIT", "weekly loss block");
+
+   MM_GuardConfig c10=cfg; c10.monthlyLossLimitPct=8.0; c10.monthlyLossPct=8.0;
+   ok=eng.CanExecute(plan,c10,rep);
+   Assert(!ok && rep.hasBlock && rep.firstBlock.reasonCode=="MONTHLY_LOSS_LIMIT", "monthly loss block");
+
+   MM_GuardConfig c11=cfg; c11.maxDrawdownPct=10.0; c11.currentDrawdownPct=10.0;
+   ok=eng.CanExecute(plan,c11,rep);
+   Assert(!ok && rep.hasBlock && rep.firstBlock.reasonCode=="MAX_DRAWDOWN", "max drawdown block");
+
+   MM_GuardConfig c12=cfg; c12.maxTradesPerDay=3; c12.tradesToday=3;
+   ok=eng.CanExecute(plan,c12,rep);
+   Assert(!ok && rep.hasBlock && rep.firstBlock.reasonCode=="MAX_TRADES_DAY", "daily trade limit block");
+
+   MM_GuardConfig c13=cfg; c13.maxConsecLoss=2; c13.consecLosses=2; c13.inCooldown=false;
+   ok=eng.CanExecute(plan,c13,rep);
+   Assert(!ok && rep.hasBlock && rep.firstBlock.reasonCode=="CONSEC_LOSS_LIMIT", "consecutive loss limit block");
+
+   MM_GuardConfig c14=cfg; c14.inCooldown=true; c14.cooldownMinutes=30;
+   ok=eng.CanExecute(plan,c14,rep);
+   Assert(!ok && rep.hasBlock && rep.firstBlock.reasonCode=="COOLDOWN", "cooldown block");
+
+   // Below limits allowed
+   MM_GuardConfig c15=cfg; c15.weeklyLossLimitPct=5.0; c15.weeklyLossPct=4.9; c15.monthlyLossLimitPct=8.0; c15.monthlyLossPct=7.9; c15.maxDrawdownPct=10.0; c15.currentDrawdownPct=9.9; c15.maxTradesPerDay=3; c15.tradesToday=2; c15.maxConsecLoss=3; c15.consecLosses=2; c15.inCooldown=false;
+   ok=eng.CanExecute(plan,c15,rep);
+   Assert(ok && rep.allowed && !rep.hasBlock, "below all limits allowed");
 
    if(g_fail==0) Print("GuardEngine_Test: ALL PASS"); else Print("GuardEngine_Test: FAIL count=",g_fail);
 }
