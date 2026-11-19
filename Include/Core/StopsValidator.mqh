@@ -1,6 +1,6 @@
 ﻿//+------------------------------------------------------------------+
 //|                                              StopsValidator.mqh  |
-//|    Phase 2/7: stops/freeze/margin/price/symbol gap checks        |
+//|    Phase 2/2.2: stops/freeze/margin/price/symbol checks         |
 //+------------------------------------------------------------------+
 #ifndef MM_STOPS_VALIDATOR_MQH
 #define MM_STOPS_VALIDATOR_MQH
@@ -122,12 +122,12 @@ public:
          return false;
       }
       double free=AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-      if(margin > free)
+      if(margin > free + 1e-9)
       {
          out.ok=false; out.blocked=true; out.reasonCode="NO_MONEY"; out.messageEN="Insufficient free margin";
          return false;
       }
-      if(free>0 && margin/free > 0.8) out.Warn("High margin usage (>80% free)");
+      if(free>0 && margin/free > 0.8) out.Warn("High margin usage (>80% free margin)");
       return true;
    }
 
@@ -143,14 +143,38 @@ public:
       double price = plan.entryPrice>0?plan.entryPrice:(isBuy?ask:bid);
       if(plan.isPending)
       {
+         // use appropriate pending order type and entry price context
          if(!ValidatePendingEntry(sym, plan.orderType, plan.entryPrice, ask, bid, out)) return false;
       }
-      double tp = plan.tpCount>0?plan.tpPrice[0]:0;
-      if(!ValidateSLTP(sym, isBuy, price, plan.slPrice, tp, out)) return false;
+
+      // Validate SL and all active TP levels (Multi-TP: up to MM_MAX_TP_LEVELS). Single-TP behavior preserved.
+      if(plan.slPrice<=0){ out.ok=false; out.blocked=true; out.reasonCode="NO_SL"; out.messageEN="Stop loss required"; return false; }
+      int tpN = plan.tpCount;
+      if(tpN < 0) tpN = 0;
+      if(tpN > MM_MAX_TP_LEVELS) tpN = MM_MAX_TP_LEVELS;
+      if(tpN <= 0)
+      {
+         MM_StopsCheck chk; chk.Reset();
+         if(!ValidateSLTP(sym, isBuy, price, plan.slPrice, 0.0, chk)){ out=chk; return false; }
+         for(int w=0; w<chk.warnCount; w++) out.Warn(chk.warnings[w]);
+      }
+      else
+      {
+         for(int i=0;i<tpN;i++)
+         {
+            double tp = plan.tpPrice[i];
+            if(tp <= 0.0){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_TP"; out.messageEN="Invalid take profit level"; return false; }
+            MM_StopsCheck chk; chk.Reset();
+            if(!ValidateSLTP(sym, isBuy, price, plan.slPrice, tp, chk)){ out=chk; return false; }
+            for(int w=0; w<chk.warnCount; w++) out.Warn(chk.warnings[w]);
+         }
+         if(tpN > 1) out.Warn("Multi-TP: multiple take-profit targets configured");
+      }
+
       ENUM_ORDER_TYPE ot = plan.isPending ? plan.orderType : (isBuy?ORDER_TYPE_BUY:ORDER_TYPE_SELL);
       if(!ValidateMargin(sym, ot, plan.lot, price, out)) return false;
       double vmin=SymbolInfoDouble(sym,SYMBOL_VOLUME_MIN), vmax=SymbolInfoDouble(sym,SYMBOL_VOLUME_MAX), vstep=SymbolInfoDouble(sym,SYMBOL_VOLUME_STEP);
-      if(plan.lot < vmin || plan.lot > vmax){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_VOLUME"; out.messageEN="Lot outside symbol volume limits"; return false; }
+      if(plan.lot < vmin - 1e-12 || plan.lot > vmax + 1e-12){ out.ok=false; out.blocked=true; out.reasonCode="INVALID_VOLUME"; out.messageEN="Lot outside symbol volume limits"; return false; }
       if(vstep>0){ double steps=MathRound(plan.lot/vstep); if(MathAbs(steps*vstep - plan.lot) > vstep*0.1) out.Warn("Lot not aligned to volume step"); }
       if(SymbolInfoInteger(sym,SYMBOL_TRADE_MODE)==SYMBOL_TRADE_MODE_DISABLED){ out.ok=false; out.blocked=true; out.reasonCode="TRADE_DISABLED"; out.messageEN="Trading disabled for symbol"; return false; }
       return true;

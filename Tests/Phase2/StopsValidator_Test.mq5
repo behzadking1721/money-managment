@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                         StopsValidator_Test.mq5  |
-//|               Phase 2: stops/freeze/margin/entry validation      |
+//|        Phase 2/2.2: stops/freeze/margin/entry/symbol checks      |
 //+------------------------------------------------------------------+
 #property script_show_inputs
 #include "..\\..\\Include\\Core\\StopsValidator.mqh"
@@ -44,6 +44,25 @@ void OnStart()
    double vmin=SymbolInfoDouble(sym,SYMBOL_VOLUME_MIN);
    ok=v.ValidateMargin(sym,ORDER_TYPE_BUY,vmin,ask,chk);
    Assert(ok,"margin ok for min lot");
+
+   // Plan validation uses correct market/pending context and enforces margin/volume
+   MM_TradePlan plan; plan.Reset(); plan.symbol=sym; plan.side=POSITION_TYPE_BUY; plan.isPending=false; plan.orderType=ORDER_TYPE_BUY;
+   plan.entryPrice=ask; plan.slPrice=ask-far; plan.tpCount=1; plan.tpPrice[0]=ask+far*2; plan.lot=vmin;
+   ok = v.ValidatePlan(plan, chk);
+   Assert(ok, "market plan valid for min lot");
+
+   // Pending plan with correct type/price context
+   MM_TradePlan pp=plan; pp.isPending=true; pp.orderType=ORDER_TYPE_BUY_LIMIT; pp.entryPrice=bid-far; pp.slPrice=pp.entryPrice-far; pp.tpPrice[0]=pp.entryPrice+far*2;
+   if(pp.entryPrice < ask)
+   {
+      ok = v.ValidatePlan(pp, chk);
+      Assert(ok || chk.reasonCode=="INVALID_STOPS" || chk.reasonCode=="NO_MONEY" || chk.reasonCode=="MARGIN_CALC_FAIL" || chk.reasonCode=="NO_PRICE", "pending plan validated with consistent reason when blocked");
+   }
+
+   // Volume outside limits blocked
+   MM_TradePlan pv=plan; pv.lot = SymbolInfoDouble(sym,SYMBOL_VOLUME_MAX) * 10.0;
+   ok = v.ValidatePlan(pv, chk);
+   Assert(!ok && chk.reasonCode=="INVALID_VOLUME", "volume outside limits blocked");
 
    if(g_fail==0) Print("StopsValidator_Test: ALL PASS"); else Print("StopsValidator_Test: FAIL count=",g_fail);
 }
