@@ -209,12 +209,15 @@ public:
       {
          if(m_tab==1)
          {
-            MM_Kpi k; k.Reset();
-            bool has=false;
-            if(m_stats!=NULL){ m_stats.GetKpiForMode(m_accMode, k); if(k.trades==0) m_stats.GetKpi(k); has=true; }
+            MM_Kpi kMode; kMode.Reset(); MM_Kpi kAll; kAll.Reset();
+            bool hasMode=false, hasAll=false;
+            if(m_stats!=NULL){ m_stats.GetKpiForMode(m_accMode, kMode); m_stats.GetKpi(kAll); hasMode=(kMode.trades>0); hasAll=(kAll.trades>0); }
+            MM_Kpi k = hasMode ? kMode : kAll;
+            bool showingAll = (!hasMode && hasAll);
+            bool hasAny = (hasMode || hasAll);
             string prof = "-";
             if(m_profiles!=NULL){ MM_ProfileRecord pr; if(m_profiles.GetActive(pr)) prof=pr.profile.name; }
-            // Phase 7: transparent, diagnosable personal/protection settings + baseline/peak context (server-time periods).
+            // Phase 7/11: transparent diagnostics + clearer stats context (mode/all, non-blocking when incomplete).
             string limDL = (gcfg.dailyLossLimitPct>0)?(DoubleToString(gcfg.dailyLossPct,1)+"/"+DoubleToString(gcfg.dailyLossLimitPct,1)+"%"):"off";
             string limWL = (gcfg.weeklyLossLimitPct>0)?(DoubleToString(gcfg.weeklyLossPct,1)+"/"+DoubleToString(gcfg.weeklyLossLimitPct,1)+"%"):"off";
             string limML = (gcfg.monthlyLossLimitPct>0)?(DoubleToString(gcfg.monthlyLossPct,1)+"/"+DoubleToString(gcfg.monthlyLossLimitPct,1)+"%"):"off";
@@ -223,7 +226,9 @@ public:
             string limCD = gcfg.inCooldown ? "ON" : "off";
             string limCL = (gcfg.maxConsecLoss>0)?(IntegerToString(gcfg.consecLosses)+"/"+IntegerToString(gcfg.maxConsecLoss)):(IntegerToString(gcfg.consecLosses)+"/-");
 
-            string l3 = m_ui.S_Trades()+":"+(has?IntegerToString(k.trades):"0")+" "+m_ui.S_WinRate()+":"+DoubleToString(k.winRate,1)+"% "+m_ui.S_PF()+":"+DoubleToString(k.profitFactor,2)+" "+m_ui.S_Net()+":"+DoubleToString(k.netProfit,2);
+            string modeTag = showingAll ? "(All)" : ("("+ModeLabel()+")");
+            string tStr = hasAny?IntegerToString(k.trades):"0";
+            string l3 = modeTag+" "+m_ui.S_Trades()+":"+tStr+" "+m_ui.S_WinRate()+":"+DoubleToString(k.winRate,1)+"% "+m_ui.S_PF()+":"+DoubleToString(k.profitFactor,2)+" "+m_ui.S_Net()+":"+DoubleToString(k.netProfit,2);
             // Phase 8: when prop mode explicitly configured, surface prop DD used/limits (and keep general protection visible).
             string l4 = "DL "+limDL+" WL "+limWL+" ML "+limML+" DD "+limDD;
             if(gcfg.accountMode==ACCOUNT_PROP && gcfg.propEnabled)
@@ -232,7 +237,8 @@ public:
                string pMD = (gcfg.propMaxTotalDDPct>0)?(DoubleToString(gcfg.propTotalDDUsedPct,1)+"/"+DoubleToString(gcfg.propMaxTotalDDPct,1)+"%"):"off";
                l4 = "PropDL "+pDL+" PropDD "+pMD+" DL "+limDL+" DD "+limDD;
             }
-            string l5 = "T "+limTr+" CL "+limCL+" CD "+limCD+" ["+ModeLabel()+"/"+prof+"]";
+            string allNote = (hasMode && hasAll) ? (" All:"+IntegerToString(kAll.trades)+"/"+DoubleToString(kAll.netProfit,2)) : "";
+            string l5 = "T "+limTr+" CL "+limCL+" CD "+limCD+" ["+ModeLabel()+"/"+prof+"]"+allNote;
             Lbl(N("Info3"), m_x+8, m_y+88, l3, clrSilver, 9);
             Lbl(N("Info4"), m_x+8, m_y+104, l4, clrKhaki, 9);
             Lbl(N("Help"),  m_x+8, m_y+120, l5, clrLightGray, 8);

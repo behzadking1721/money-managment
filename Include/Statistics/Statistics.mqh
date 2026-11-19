@@ -84,6 +84,7 @@ private:
    double            m_lastPlannedRisk;
    string            m_lastPlannedSymbol;
    datetime          m_lastPlannedTime;
+   bool              m_liveSync; // default true; set false in focused tests to simulate remaining volume without terminal positions
 
    int FindOpenByPos(long posId)
    {
@@ -240,11 +241,12 @@ private:
       if(idx<0) idx = FindOpenBySymbol(event.symbol);
       if(idx<0 || !m_open[idx].active)
       {
-         // cannot aggregate; record as standalone partial-close trade
+         // cannot aggregate; record as standalone partial-close trade (limitation: lifecycle context incomplete)
          MM_ClosedTrade t; t.Reset();
          t.ticket=(event.ticket!=0?event.ticket:event.order); t.positionId=event.positionId; t.symbol=event.symbol;
          t.openTime=event.timeServer; t.closeTime=event.timeServer; t.openPrice=event.price; t.closePrice=event.price;
          t.volume=event.volume; t.profit=event.profit; t.commission=event.commission; t.swap=event.swap;
+         t.typeStr="";
          t.accountMode=m_currentMode; t.durationSec=0; t.rMultiple=0;
          PushClosed(t);
          g_mmLog.Warn("STATS_PARTIAL_ORPHAN","Partial close without tracked open pos="+(string)event.positionId+" sym="+event.symbol);
@@ -255,24 +257,29 @@ private:
       m_open[idx].realizedSwap += event.swap;
       m_open[idx].closedVolume += event.volume;
       m_open[idx].lastEventTime = (event.timeServer!=0?event.timeServer:TimeCurrent());
-      // update remaining volume from live position if possible
-      double beforeRemain = m_open[idx].volumeRemain;
-      SyncOpenFromPosition(m_open[idx]);
-      if(m_open[idx].volumeRemain <= 0.0 || !PositionStillOpen(m_open[idx].positionId, m_open[idx].symbol))
+
+      bool finalized=false;
+      if(m_liveSync)
+      {
+         SyncOpenFromPosition(m_open[idx]);
+         if(m_open[idx].volumeRemain <= 0.0 || !PositionStillOpen(m_open[idx].positionId, m_open[idx].symbol))
+            finalized=true;
+      }
+      else
+      {
+         // Deterministic/offline path for focused tests and explicit simulations (no terminal position dependency).
+         m_open[idx].volumeRemain = MathMax(0.0, m_open[idx].volumeRemain - event.volume);
+         if(m_open[idx].volumeRemain <= 1e-12)
+            finalized=true;
+      }
+
+      if(finalized)
       {
          double totalVol = m_open[idx].closedVolume; if(totalVol<=0) totalVol=m_open[idx].volumeInitial;
          FinalizeTrade(idx,event,m_open[idx].realizedProfit,m_open[idx].realizedCommission,m_open[idx].realizedSwap,totalVol,m_open[idx].lastEventTime,event.price);
       }
-      else
-      {
-         // proportionally reduce baseline risk to remaining exposure
-         if(beforeRemain>0 && m_open[idx].volumeRemain < beforeRemain && m_open[idx].volumeInitial>0)
-         {
-            double frac = m_open[idx].volumeRemain / beforeRemain;
-            if(frac<0) frac=0;
-            m_open[idx].initialRiskMoney = MathMax(0.0, m_open[idx].initialRiskMoney * frac);
-         }
-      }
+      // Keep initialRiskMoney as lifecycle baseline for R on the aggregated completed trade.
+      // Remaining open risk is derived from remaining volume (live calc/fallback) without mutating baseline.
    }
 
    void HandleClose(const MM_TradeEvent &event)
@@ -336,15 +343,23 @@ private:
       k.maxDrawdown = maxDD;
    }
 
+   bool GetClosedBySeq(int seq, MM_ClosedTrade &out)
+   {
+      // seq in chronological order of retained records (0 = oldest retained)
+      return GetClosed(seq, out);
+   }
+
 public:
-   CStatistics(){ m_openCount=0; m_closedCount=0; m_closedHead=0; m_csvPath="MoneyManager_trades.csv"; m_currentMode=ACCOUNT_PERSONAL; m_lastPlannedRisk=0; m_lastPlannedSymbol=""; m_lastPlannedTime=0; }
+   CStatistics(){ m_openCount=0; m_closedCount=0; m_closedHead=0; m_csvPath="MoneyManager_trades.csv"; m_currentMode=ACCOUNT_PERSONAL; m_lastPlannedRisk=0; m_lastPlannedSymbol=""; m_lastPlannedTime=0; m_liveSync=true; }
 
    void Init(string csvName="MoneyManager_trades.csv")
    {
-      m_csvPath=csvName; m_openCount=0; m_closedCount=0; m_closedHead=0; m_lastPlannedRisk=0; m_lastPlannedSymbol=""; m_lastPlannedTime=0;
+      m_csvPath=csvName; m_openCount=0; m_closedCount=0; m_closedHead=0; m_lastPlannedRisk=0; m_lastPlannedSymbol=""; m_lastPlannedTime=0; m_liveSync=true;
    }
 
    void SetAccountMode(ENUM_MM_ACCOUNT_MODE mode){ m_currentMode=mode; }
+   void SetLiveSync(bool v){ m_liveSync=v; }
+   bool LiveSync(){ return m_liveSync; }
    void RegisterPlannedRisk(const string symbol,double riskMoney,ENUM_MM_ACCOUNT_MODE mode)
    {
       m_lastPlannedSymbol=symbol; m_lastPlannedRisk=riskMoney; m_currentMode=mode; m_lastPlannedTime=TimeCurrent();
@@ -407,12 +422,14 @@ public:
       string path = (filename=="")? m_csvPath : filename;
       int h=FileOpen(path, FILE_WRITE|FILE_CSV|FILE_COMMON|FILE_ANSI, ',');
       if(h==INVALID_HANDLE){ Print("Stats: failed to open CSV ",path); g_mmLog.Error("CSV_OPEN_FAIL",path); return false; }
-      FileWrite(h,"ticket","symbol","type","openTime","closeTime","volume","openPrice","closePrice","profit","commission","swap","R","duration","accountMode");
+      // Schema note (Phase 11): additive 'net' appended for reconciliation; existing columns/order preserved.
+      FileWrite(h,"ticket","symbol","type","openTime","closeTime","volume","openPrice","closePrice","profit","commission","swap","R","duration","accountMode","net");
       for(int i=0;i<m_closedCount;i++)
       {
          MM_ClosedTrade t; if(!GetClosed(i,t)) continue;
          if(filterByMode && t.accountMode!=modeFilter) continue;
          int digits=(int)SymbolInfoInteger(t.symbol,SYMBOL_DIGITS); if(digits<=0) digits=5;
+         double net = t.profit + t.commission + t.swap;
          FileWrite(h,
             (string)t.ticket,
             t.symbol,
@@ -427,7 +444,8 @@ public:
             DoubleToString(t.swap,2),
             DoubleToString(t.rMultiple,4),
             (string)t.durationSec,
-            (string)((int)t.accountMode)
+            (string)((int)t.accountMode),
+            DoubleToString(net,2)
          );
       }
       FileClose(h);
