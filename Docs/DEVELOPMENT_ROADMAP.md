@@ -188,6 +188,18 @@
   - Documentation set (baseline, module status, roadmap, technical debt) reflects shipped behavior and known limitations.
 - **Relevant tests:** Full `Tests/*` suite as applicable, `Docs/test-checklist.md`, Strategy Tester scenarios if/when added, CI compile workflow verification.
 
+## Persistence & Recovery (next phase priority — not an independent roadmap phase)
+
+There is **no independent "Persistence and Recovery Engine" phase** in the roadmap. Persistence/recovery safety gaps are addressed as the next phase priority, mapping to tech-debt items **TD-05** (High: state persistence/migration/gating under restart/upgrade/corruption scenarios) and **TD-17** (High: time-fallback impacts on resets/counters if not fully surfaced/gated).
+
+Implementation approach: build on existing `StateStore`/`Protection`/`TradeLifecycle`/`Statistics` (no rewrite of healthy code). `Include/State/RecoveryEngine.mqh` (`CRecoveryEngine`) orchestrates restart recovery:
+- Never auto-resets/re-bases protective baselines when continuity uncertain.
+- Blocks new risk-increasing actions until explicit resolution.
+- Keeps risk-reducing position management (BE/trail/close) active even in failed/blocked recovery state.
+- Preserves original state + `.bak`; no auto overwrite.
+- No account identity (login/broker/server) persisted.
+- Backward-compatible: prior `StateStore` schema versions remain migratable.
+
 ## Cross-Cutting Constraints (All Phases)
 - Preserve and verify: BUY/SELL; Market, Pending Limit, Pending Stop; interactive Entry/SL/TP lines; auto/manual lot sizing; live risk/P&L preview; optional Multi-TP (max 5 initially, off by default); BE/Trailing (off by default); Personal default mode; optional configurable Prop Firm mode; Risk Guardian; News/Sessions; Statistics/Reporting.
 - Maintain central reject/logging discipline and no-silent-send behavior.

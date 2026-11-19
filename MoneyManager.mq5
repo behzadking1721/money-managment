@@ -19,6 +19,7 @@
 #include "Include/Core/OrderManager.mqh"
 #include "Include/Core/PositionManager.mqh"
 #include "Include/State/StateStore.mqh"
+#include "Include/State/RecoveryEngine.mqh"
 #include "Include/Trade/TradeLifecycle.mqh"
 #include "Include/Guards/GuardEngine.mqh"
 #include "Include/Protection/Protection.mqh"
@@ -80,6 +81,7 @@ CRiskEngine g_risk; CStopsValidator g_stops; CExecutionPolicy g_execPolicy; CExe
 CPositionManager g_positions; CProtection g_prot; CPropFirm g_prop; CNewsManager g_news;
 CSessionManager g_session; CAlertManager g_alerts; CStatistics g_stats; CProfileManager g_profiles;
 CStateStore g_store; CTradeLifecycle g_lifecycle; CGuardEngine g_guards;
+CRecoveryEngine g_recovery;
 CPanelShell g_ui; CDragTool g_drag; CPositionDragTool g_posDrag;
 
 MM_RiskContext g_riskCtx; MM_GuardConfig g_guardCfg; MM_ExecPolicy g_policy;
@@ -199,7 +201,7 @@ int    EffNewsMinutesAfter(){ MM_ProfileRecord pr; if(g_profiles.GetActive(pr) &
 
 bool StoreReadyForRiskIncreasing()
 {
-   return g_store.IsOperational();
+   return g_store.IsOperational() && !g_recovery.RiskIncreasingBlocked();
 }
 
 void RefreshRiskContext()
@@ -472,6 +474,12 @@ int OnInit()
    bool storeInit = g_store.Init();
    if(!storeInit)
       g_mmLog.Warn("STATE_INIT_FAIL","StateStore init returned false (unsafe/blocked); reason="+g_store.StatusReason());
+
+   // Persistence & Recovery Engine: evaluate restart recovery, never auto re-base.
+   g_recovery.SetStore(g_store);
+   g_recovery.RecoverOnRestart();
+   if(!g_recovery.IsOperational())
+      g_mmLog.Warn("RECOVERY_NOT_OPERATIONAL", g_recovery.ReportText());
 
    g_alerts.Init();
    g_ui.status.SetAlerts(GetPointer(g_alerts));

@@ -34,6 +34,12 @@ All notable changes to this project are documented here (phase-based).
 ### Phase 11 progress (2026-11-19)
 - **Phase 11 (Statistics and Reporting, in progress):** Improved statistics aggregation for partial/INOUT closes (deterministic lifecycle finalization path for focused/offline accounting, preserved initial-risk baseline for aggregated R, commission/swap included in net) and added additive `net` column to CSV export for reconciliation while preserving existing schema order. Stats UI now clarifies per-mode/all context and totals; incomplete data remains non-blocking. Added focused test `Tests/Phase11/Statistics_Reporting_Test.mq5`. Compiles clean (0 errors, 0 warnings); runtime MT5 script/demo verification **not run**. Broker-history reconciliation and full hedging/netting parity remain pending validation.
 
+### Phase 12 / Persistence & Recovery (2026-11-19)
+- **Persistence & Recovery Engine (next phase priority, TD-05/TD-17):** Roadmap has **no independent "Persistence and Recovery Engine" phase**; persistence/recovery safety gaps (TD-05 state persistence/migration/gating under restart/upgrade/corruption; TD-17 time-fallback surfacing) are addressed as the next phase priority, building on existing `StateStore`/`Protection`/`TradeLifecycle`/`Statistics` without rewriting healthy code.
+- **Added:** `Include/State/RecoveryEngine.mqh` — `CRecoveryEngine` orchestrates restart recovery on top of `CStateStore`. Recovery outcomes: `PRIMARY_OK`, `BACKUP_FALLBACK`, `DEGRADED`, `BLOCKED`, `EXPLICIT_INIT_OK`. Never auto-resets/re-bases protective baselines when continuity uncertain; blocks new risk-increasing actions until explicit resolution; keeps risk-reducing position management (BE/trail/close) active even in failed/blocked recovery state; preserves original state + `.bak`; no account identity (login/broker/server) persisted.
+- **Wired:** `MoneyManager.mq5` binds `CRecoveryEngine` to `CStateStore` on `OnInit`, gates `StoreReadyForRiskIncreasing()` on recovery state, position risk-reduction loop in `OnTick` remains active regardless of recovery outcome.
+- **Added test:** `Tests/Phase12/RecoveryEngine_Test.mq5` — focused checks: fresh init block, explicit init, simulated restart (continuity uncertain, state preserved), corrupt primary + valid backup (backup fallback), corrupt primary + corrupt backup (blocked/manual review), future schema (blocked, no rebase, no overwrite), privacy (no login/server/broker persisted), risk-reduction active invariant in all states.
+
 ## [v0.7.0-phase7] - 2026-11-18 (Phase 7: Hardening)
 
 ### Added

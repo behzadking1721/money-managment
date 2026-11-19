@@ -52,6 +52,7 @@ Classification legend:
 |---|---|---|---|---|---|
 | `Include/Trade/TradeLifecycle.mqh` | Normalize `OnTradeTransaction` into events, dispatch listeners, record rejects, handle partial/full close semantics | Partially Complete | Yes | MT5 trade transaction structs, listener interfaces, logger/reject sink | Full hedging vs netting parity and all broker edge cases require runtime validation |
 | `Include/State/StateStore.mqh` | Per-account JSON state persistence with lock, stale takeover, atomic save/bak, migration/fail-safe, baselines/peaks/counters | Partially Complete | Yes | `SimpleJson`, file I/O, contracts/time helpers | `IsOperational` fail-safe must be honored by all actions; schema/migration and full UI/template persistence coverage need continued verification |
+| `Include/State/RecoveryEngine.mqh` | Restart recovery orchestration on top of `CStateStore`: backup fallback, corrupt-data handling, continuity-uncertain gating, explicit-resolution-only init; risk-reduction stays active in blocked state | Partially Complete | Yes (wired in `MoneyManager.mq5`) | `StateStore`, `Contracts`, `Logger` | Recovery execution evidence pending; runtime restart/backup-fallback validation on demo not yet run |
 | `Include/Profiles/Profiles.mqh` | Default profiles, effective parameter resolution, active profile selection, per-account persistence, import/export | Complete | Yes | `SimpleJson`, file I/O, contracts/enums | Import/export paths and schema evolution require validation; UI exposure is subset of all profile fields |
 
 ## 5. Protection, Prop, News, Session
@@ -100,7 +101,7 @@ Classification legend:
 ## 9. Summary Counts (by classification, module inventory rows above)
 
 - **Complete:** 24
-- **Partially Complete:** 14
+- **Partially Complete:** 15
 - **Legacy:** 1
 - **Not Used:** 0 (as sole classification; non-runtime docs/tests marked accordingly in context)
 - **Needs Verification:** 6

@@ -14,6 +14,17 @@ Use this checklist for demo/validation. Record evidence (screenshots, logs, Stra
 - [ ] `Tests/Phase1/StateStore_Test.mq5` passes (init/load/save, atomic write, `.bak`, migration hook, fail-safe on future version, server-time fallback behavior as designed).
 - [ ] `Tests/Phase1/Lifecycle_Map_Test.mq5` passes (transaction → normalized `MM_TradeEvent` mapping, reject sink basics).
 
+### Persistence & Recovery (Phase 12 / TD-05 TD-17)
+- [ ] `Tests/Phase12/RecoveryEngine_Test.mq5` passes:
+    - Fresh init: not operational, risk-increasing blocked, risk-reduction active, explicit resolution required.
+    - Explicit new protective init: operational, risk-increasing allowed.
+    - Simulated restart: continuity uncertain, state preserved, not operational, no auto rebase.
+    - Corrupt primary + valid backup: backup fallback, blocked, risk-reduction active, original+backup preserved.
+    - Corrupt primary + corrupt backup: blocked/manual review, no auto reset/rebase.
+    - Future schema: blocked, no rebase, no overwrite.
+    - Privacy: no login/server/broker key persisted.
+    - Risk-reduction active invariant holds in all states.
+
 ### Manual / Integration
 - [ ] State stored per account under `MQL5/Files/MoneyManager/` (`state_<login>.json|.lock|.bak|.tmp`).
 - [ ] Restart-safe: per-symbol/template/UI-relevant persisted fields restore after EA/chart restart.

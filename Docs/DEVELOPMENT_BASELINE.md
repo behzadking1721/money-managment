@@ -76,6 +76,7 @@
 │   ├── Protection/Protection.mqh
 │   ├── Session/SessionManager.mqh
 │   ├── State/StateStore.mqh
+│   ├── State/RecoveryEngine.mqh
 │   ├── Statistics/Statistics.mqh
 │   ├── Trade/TradeLifecycle.mqh
 │   ├── UI/
@@ -120,7 +121,7 @@
 | Validation & execution | `Core/StopsValidator.mqh`, `Core/ExecutionPolicy.mqh`, `Core/ExecutionRouter.mqh`, `Core/OrderManager.mqh`, `Core/PositionManager.mqh` | Pre-send validation, retcode/retry policy, guarded send pipeline, order/position operations (BE/trail/partial/close/time exit) |
 | Observability & rejects | `Core/Logger.mqh`, `Core/RejectSink.mqh`, `UI/StatusLog.mqh`, `Trade/TradeLifecycle.mqh` | File/print logging, unified reject sink, transaction normalization and event dispatch |
 | Guards | `Guards/GuardEngine.mqh`, `IGuard.mqh`, `PermissionGuard.mqh`, `PropGuard.mqh`, `ProtectionGuard.mqh`, `NewsGuard.mqh`, `SessionSpreadGuard.mqh` | Priority-ordered allow/warn/block checks for permissions, prop limits, protection/DD, news, session/spread |
-| State & persistence | `State/StateStore.mqh`, `Profiles/Profiles.mqh` | Per-account state (lock/atomic save/bak/migration/fail-safe, counters/baselines/peaks) and profile persistence/import/export |
+| State & persistence | `State/StateStore.mqh`, `State/RecoveryEngine.mqh`, `Profiles/Profiles.mqh` | Per-account state (lock/atomic save/bak/migration/fail-safe, counters/baselines/peaks) and profile persistence/import/export; restart recovery orchestration on top of StateStore (backup fallback, corrupt-data handling, continuity-uncertain gating) |
 | Account protection & prop | `Protection/Protection.mqh`, `PropFirm/PropFirm.mqh` | Daily/weekly/monthly DD tracking helpers, streaks/cooldown/trade counts, prop presets/rules and DD used/remaining calculations |
 | Market context | `News/NewsManager.mqh`, `Session/SessionManager.mqh` | News events/blackout/staleness/source handling; session detection/filtering |
 | Reporting & alerts | `Statistics/Statistics.mqh`, `Alerts/Alerts.mqh` | Trade KPIs, open-risk estimation, CSV export, cooldowned alerts |
